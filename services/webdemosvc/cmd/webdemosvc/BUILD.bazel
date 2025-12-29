@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "webdemosvc_lib",
+    srcs = ["main.go"],
+    importpath = "grouter/services/webdemosvc/cmd/webdemosvc",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//services/webdemosvc/internal/app",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_binary(
+    name = "webdemosvc",
+    embed = [":webdemosvc_lib"],
+    visibility = ["//visibility:public"],
+)

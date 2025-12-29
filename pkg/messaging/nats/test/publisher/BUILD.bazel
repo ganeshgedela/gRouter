@@ -1,0 +1,18 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "publisher_lib",
+    srcs = ["main.go"],
+    importpath = "grouter/pkg/messaging/nats/test/publisher",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//pkg/messaging/nats",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_binary(
+    name = "publisher",
+    embed = [":publisher_lib"],
+    visibility = ["//visibility:public"],
+)

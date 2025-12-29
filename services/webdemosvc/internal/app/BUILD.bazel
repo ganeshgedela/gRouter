@@ -1,0 +1,36 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "app",
+    srcs = [
+        "app.go",
+        "bootstrap.go",
+        "health.go",
+        "stop.go",
+    ],
+    importpath = "grouter/services/webdemosvc/internal/app",
+    visibility = ["//services/webdemosvc:__subpackages__"],
+    deps = [
+        "//pkg/health",
+        "//pkg/manager",
+        "//pkg/web",
+        "//services/webdemosvc/internal/pkg/webdemo",
+        "@com_github_gin_gonic_gin//:gin",
+        "@com_github_go_viper_mapstructure_v2//:mapstructure",
+        "@com_github_google_uuid//:uuid",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "app_test",
+    srcs = ["integration_test.go"],
+    args = ["-test.v"],
+    data = ["//configs:config.yaml"],
+    embed = [":app"],
+    tags = ["requires-network"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

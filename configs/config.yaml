@@ -1,0 +1,147 @@
+# gRouter Complete Configuration
+# This file serves as a reference for all available configuration options.
+
+app:
+  name: "gRouter"
+  version: "1.0.0"
+  environment: "development" # development, production, test
+
+# Logging Configuration
+log:
+  level: "debug"   # debug, info, warn, error, dpanic, panic, fatal
+  format: "console" # console, json
+  output_path: "stdout" # stdout, stderr, or file path
+
+# Global Metrics Configuration
+metrics:
+  enabled: true
+  path: "/metrics"
+
+# Global Tracing Configuration (OpenTelemetry)
+tracing:
+  enabled: true
+  service_name: "grouter-core"
+  exporter: "stdout" # stdout, jaeger, zipkin, otlp
+  endpoint: "" # e.g., "http://localhost:14268/api/traces" for Jaeger
+
+# Web Server Configuration
+web:
+  enabled: true
+  port: 8080
+  mode: "debug" # debug, release, test
+  read_timeout: "10s"
+  write_timeout: "10s"
+  shutdown_timeout: "5s"
+
+  # Web-specific Metrics Override (optional, defaults to global provided by middleware)
+  metrics:
+    enabled: true
+    path: "/metrics"
+
+  # TLS Configuration
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+
+  # CORS (Cross-Origin Resource Sharing)
+  cors:
+    enabled: true
+    allowed_origins: 
+      - "*"
+    allowed_methods:
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "OPTIONS"
+    allowed_headers:
+      - "Origin"
+      - "Content-Type"
+      - "Authorization"
+      - "Accept"
+    exposed_headers:
+      - "Content-Length"
+    allow_credentials: true
+    max_age: 43200 # 12 hours in seconds
+
+  # Security Headers
+  security:
+    enabled: true
+    xss_protection: "1; mode=block"
+    content_type_nosniff: "nosniff"
+    x_frame_options: "DENY"
+    hsts_max_age: 31536000 # 1 year
+    hsts_exclude_subdomains: false
+    content_security_policy: "default-src 'self'"
+    referrer_policy: "strict-origin-when-cross-origin"
+    custom_headers:
+      X-Powered-By: "gRouter"
+
+  # Rate Limiting
+  rate_limit:
+    enabled: true
+    requests_per_second: 100
+    burst: 200
+
+  # Swagger API Documentation
+  swagger:
+    enabled: true
+    path: "/swagger"
+
+# NATS Messaging Configuration
+nats:
+  enabled: true
+  url: "nats://localhost:4222"
+  max_reconnects: 5
+  reconnect_wait: "2s"
+  connection_timeout: "2s"
+  
+  # Authentication (Choose one method or none)
+  # 1. Token Auth
+  # token: "my-token"
+  
+  # 2. User/Pass Auth
+  # username: "user"
+  # password: "password"
+  
+  # 3. Credentials File (NKeys/User JWT)
+  # creds_file: "/path/to/user.creds"
+
+  # TLS/SSL
+  use_tls: false
+  skip_verify: false
+  ca_file: ""
+  cert_file: ""
+  key_file: ""
+  
+  metrics:
+    enabled: true
+    path: "/metrics"
+
+# Database Configuration (GORM)
+database:
+  driver: "sqlite" # postgres, sqlite, mysql, sqlserver
+  
+  # PostgreSQL / MySQL settings
+  host: "localhost"
+  port: 5432
+  user: "postgres"
+  password: "password"
+  dbname: "grouter"
+  ssl_mode: "disable" # disable, require, verify-ca, verify-full
+  
+  # Logger settings
+  log_level: "warn" # silent, error, warn, info
+  
+  # Connection Pool settings
+  max_open_conns: 25
+  max_idle_conns: 5
+  conn_max_lifetime: "1h"
+
+# Dynamic Service Toggle
+# Enable/Disable individual services loaded by the ServiceManager
+services:
+  webdemosvc: 
+    enabled: true
+  natsdemosvc: true

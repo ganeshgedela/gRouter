@@ -1,0 +1,78 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  # Use Ubuntu 22.04 LTS
+  config.vm.box = "ubuntu/jammy64"
+
+  # VM Configuration
+  config.vm.provider "virtualbox" do |vb|
+    vb.memory = "4096"
+    vb.cpus = 2
+  end
+
+  # Mount the project root to /home/vagrant/gRouter
+  # Assuming Vagrantfile is in tools/, so root is ../
+  config.vm.synced_folder "../", "/home/vagrant/gRouter"
+
+  # Provisioning Script
+  config.vm.provision "shell", inline: <<-SHELL
+    set -e
+
+    echo "Updating system..."
+    apt-get update
+    apt-get install -y curl git unzip build-essential ca-certificates gnupg lsb-release
+
+    # --- Install Go 1.22.2 ---
+    if ! command -v go &> /dev/null; then
+        echo "Installing Go..."
+        curl -LO https://go.dev/dl/go1.22.2.linux-amd64.tar.gz
+        rm -rf /usr/local/go && tar -C /usr/local -xzf go1.22.2.linux-amd64.tar.gz
+        rm go1.22.2.linux-amd64.tar.gz
+        
+        # Setup GOPATH and PATH for vagrant user
+        echo 'export PATH=$PATH:/usr/local/go/bin:/home/vagrant/go/bin' >> /home/vagrant/.bashrc
+        echo 'export GOPATH=/home/vagrant/go' >> /home/vagrant/.bashrc
+        chown vagrant:vagrant /home/vagrant/.bashrc
+    fi
+
+    # --- Install Docker ---
+    if ! command -v docker &> /dev/null; then
+        echo "Installing Docker..."
+        mkdir -p /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo \
+          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+          $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+        apt-get update
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+        
+        # Add vagrant user to docker group
+        usermod -aG docker vagrant
+    fi
+
+    # --- Install Bazelisk (as bazel) ---
+    if ! command -v bazel &> /dev/null; then
+        echo "Installing Bazelisk..."
+        curl -Lo /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64
+        chmod +x /usr/local/bin/bazel
+    fi
+
+    # --- Install NATS CLI ---
+    # We use the Go installation method but system-wide or for vagrant user
+    # Or download release to avoid compiling
+    if ! command -v nats &> /dev/null; then
+        echo "Installing NATS CLI..."
+        # Install via Go to /usr/local/bin/nats or similar, strictly we can use go install if go is in path
+        # But let's download binary for speed/reliability
+        curl -L https://github.com/nats-io/natscli/releases/download/v0.1.4/nats-0.1.4-linux-amd64.zip -o nats.zip
+        unzip -o nats.zip
+        mv nats-0.1.4-linux-amd64/nats /usr/local/bin/
+        chmod +x /usr/local/bin/nats
+        rm -rf nats.zip nats-0.1.4-linux-amd64
+    fi
+
+    echo "Provisioning complete! Log in with 'vagrant ssh'"
+    echo "Your project code is mounted at /home/vagrant/gRouter"
+  SHELL
+end

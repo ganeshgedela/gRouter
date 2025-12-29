@@ -1,0 +1,38 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "database",
+    srcs = [
+        "database.go",
+        "metrics.go",
+        "pagination.go",
+        "repository.go",
+    ],
+    importpath = "grouter/pkg/database",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/config",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@io_gorm_driver_postgres//:postgres",
+        "@io_gorm_driver_sqlite//:sqlite",
+        "@io_gorm_gorm//:gorm",
+        "@io_gorm_gorm//logger",
+        "@io_gorm_plugin_opentelemetry//tracing",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "database_test",
+    srcs = [
+        "database_test.go",
+        "repository_test.go",
+        "transaction_test.go",
+    ],
+    embed = [":database"],
+    deps = [
+        "//pkg/config",
+        "@com_github_stretchr_testify//assert",
+        "@org_uber_go_zap//:zap",
+    ],
+)

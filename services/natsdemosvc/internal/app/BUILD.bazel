@@ -1,0 +1,42 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "app",
+    srcs = [
+        "app.go",
+        "bootstrap.go",
+        "health.go",
+        "stop.go",
+    ],
+    importpath = "grouter/services/natsdemosvc/internal/app",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/health",
+        "//pkg/manager",
+        "//pkg/messaging/nats",
+        "//services/natsdemosvc/internal/pkg/natdemo",
+        "@com_github_go_viper_mapstructure_v2//:mapstructure",
+        "@com_github_google_uuid//:uuid",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "app_test",
+    srcs = [
+        "app_test.go",
+        "bootstrap_test.go",
+        "integration_test.go",
+        "stop_test.go",
+    ],
+    embed = [":app"],
+    deps = [
+        "//pkg/messaging/nats",
+        "@com_github_nats_io_nats_go//:nats_go",
+        "@com_github_nats_io_nats_server_v2//server",
+        "@com_github_spf13_pflag//:pflag",
+        "@com_github_spf13_viper//:viper",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)

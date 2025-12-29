@@ -1,0 +1,47 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "web",
+    srcs = [
+        "config.go",
+        "metrics.go",
+        "ratelimit.go",
+        "requestid.go",
+        "server.go",
+        "types.go",
+    ],
+    importpath = "grouter/pkg/web",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//docs",
+        "//pkg/health",
+        "@com_github_gin_contrib_cors//:cors",
+        "@com_github_gin_contrib_secure//:secure",
+        "@com_github_gin_gonic_gin//:gin",
+        "@com_github_google_uuid//:uuid",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_client_golang//prometheus/promhttp",
+        "@com_github_swaggo_files//:files",
+        "@com_github_swaggo_gin_swagger//:gin-swagger",
+        "@io_opentelemetry_go_contrib_instrumentation_github_com_gin_gonic_gin_otelgin//:otelgin",
+        "@org_golang_x_time//rate",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "web_test",
+    srcs = [
+        "benchmark_test.go",
+        "integration_test.go",
+        "middleware_test.go",
+        "server_test.go",
+    ],
+    embed = [":web"],
+    deps = [
+        "//pkg/health",
+        "@com_github_gin_gonic_gin//:gin",
+        "@com_github_stretchr_testify//assert",
+        "@org_uber_go_zap//:zap",
+    ],
+)

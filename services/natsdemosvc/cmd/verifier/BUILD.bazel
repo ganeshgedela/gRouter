@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "verifier_lib",
+    srcs = ["main.go"],
+    importpath = "grouter/services/natsdemosvc/cmd/verifier",
+    visibility = ["//visibility:private"],
+    deps = ["@com_github_nats_io_nats_go//:nats_go"],
+)
+
+go_binary(
+    name = "verifier",
+    embed = [":verifier_lib"],
+    visibility = ["//visibility:public"],
+)

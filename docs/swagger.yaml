@@ -1,0 +1,72 @@
+basePath: /
+definitions:
+  natsdemosvc.EchoRequest:
+    properties:
+      message:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: Generic Web Framework for gRouter
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: gRouter API
+  version: "1.0"
+paths:
+  /natsdemosvc/echo:
+    post:
+      consumes:
+      - application/json
+      description: Returns the input message in the response
+      parameters:
+      - description: Echo Request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/natsdemosvc.EchoRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Echoes the input message
+      tags:
+      - natsdemosvc
+  /natsdemosvc/hello:
+    get:
+      consumes:
+      - application/json
+      description: Returns a JSON object with a hello message
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Returns a hello message
+      tags:
+      - natsdemosvc
+schemes:
+- http
+- https
+swagger: "2.0"

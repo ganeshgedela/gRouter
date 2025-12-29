@@ -1,0 +1,82 @@
+app:
+  name: "natsdemosvc"
+  version: "1.0.0"
+  environment: "development"
+
+tracing:
+  enabled: false
+  service_name: "natsdemosvc"
+  exporter: "stdout"
+
+nats:
+  enabled: true
+  url: "nats://localhost:4222"
+  max_reconnects: 10
+  reconnect_wait: 2s
+  connection_timeout: 5s
+  token: ""
+  username: ""
+  password: ""
+  creds_file: ""
+  use_tls: false
+  skip_verify: false
+  ca_file: ""
+  cert_file: ""
+  key_file: ""
+  metrics:
+    enabled: true
+
+log:
+  level: "info"
+  format: "console"  # json or console
+  output_path: "stdout"
+
+web:
+  enabled: false
+  port: 8080
+  read_timeout: 10s
+  write_timeout: 10s
+  shutdown_timeout: 5s
+  mode: "release"
+  metrics:
+    enabled: true
+    path: "/metrics"
+  tracing:
+    enabled: true
+    service_name: "grouter-web"
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allowed_headers: ["Origin", "Content-Type", "Accept", "Authorization"]
+    allow_credentials: true
+    max_age: 3600
+  security:
+    enabled: true
+    xss_protection: "1; mode=block"
+    content_type_nosniff: "nosniff"
+    x_frame_options: "DENY"
+    hsts_max_age: 31536000
+    hsts_exclude_subdomains: true
+    content_security_policy: "default-src 'self'"
+    referrer_policy: "strict-origin-when-cross-origin"
+  rate_limit:
+    enabled: true
+    requests_per_second: 100
+    burst: 200
+  swagger:
+    enabled: true
+    path: "/swagger"
+
+services:
+    natdemo:
+      enabled: true
+      subject: "natdemo"
+    httpdemo:
+      enabled: true
+      subject: "httpdemo"
+

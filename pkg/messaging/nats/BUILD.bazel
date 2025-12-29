@@ -1,0 +1,55 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "nats",
+    srcs = [
+        "client.go",
+        "messenger.go",
+        "middleware.go",
+        "publisher.go",
+        "subscriber.go",
+        "tracing.go",
+        "types.go",
+        "validator.go",
+    ],
+    importpath = "grouter/pkg/messaging/nats",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_google_uuid//:uuid",
+        "@com_github_nats_io_nats_go//:nats_go",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@com_github_prometheus_client_golang//prometheus/promauto",
+        "@io_opentelemetry_go_otel//:otel",
+        "@io_opentelemetry_go_otel//attribute",
+        "@io_opentelemetry_go_otel//semconv/v1.17.0:v1_17_0",
+        "@io_opentelemetry_go_otel_trace//:trace",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "nats_test",
+    srcs = [
+        "client_test.go",
+        "jetstream_test.go",
+        "messenger_test.go",
+        "middleware_test.go",
+        "publisher_test.go",
+        "pull_test.go",
+        "subscriber_test.go",
+        "types_test.go",
+        "validator_test.go",
+    ],
+    embed = [":nats"],
+    tags = ["requires-network"],
+    deps = [
+        "@com_github_nats_io_nats_go//:nats_go",
+        "@com_github_prometheus_client_golang//prometheus/testutil",
+        "@com_github_stretchr_testify//assert",
+        "@io_opentelemetry_go_otel//:otel",
+        "@io_opentelemetry_go_otel_sdk//trace",
+        "@io_opentelemetry_go_otel_sdk//trace/tracetest",
+        "@org_uber_go_zap//:zap",
+        "@org_uber_go_zap//zaptest/observer",
+    ],
+)
