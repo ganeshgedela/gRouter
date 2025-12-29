@@ -7,6 +7,7 @@ go_library(
     visibility = ["//visibility:private"],
     deps = [
         "//pkg/messaging/nats",
+        "@com_github_spf13_viper//:viper",
         "@org_uber_go_zap//:zap",
     ],
 )

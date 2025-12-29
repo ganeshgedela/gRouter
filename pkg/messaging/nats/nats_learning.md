@@ -404,56 +404,82 @@ func main() {
 
 ## JetStream Patterns (Persistence & Reliability)
 
-### 4. JetStream Publish (At-Least-Once Delivery)
+### 4. JetStream Publish Patterns
 
-JetStream ensures messages are persisted and acknowledged. The publisher waits for an acknowledgement from the server.
+#### 4.1 Synchronous Publish (PublishJS)
 
-#### Sequence Diagram
+**Function**: `PublishJS` blocks until the NATS server acknowledges the message persistence (PubAck). This guarantees at-least-once delivery but has higher latency due to the round-trip time.
 
+**Sequence Diagram**:
 ```mermaid
 sequenceDiagram
-    participant Publisher
-    participant JetStream as JetStream (NATS)
+    participant App
+    participant Client Library
+    participant JetStream (NATS)
 
-    Publisher->>JetStream: Publish(Msg)
-    JetStream-->>Publisher: PubAck (SeqNo)
-    Note right of JetStream: Message persisted
+    App->>Client Library: PublishJS(Msg)
+    Client Library->>JetStream: PUB subject <Msg>
+    Note right of JetStream: Persist Message
+    JetStream-->>Client Library: PubAck (SeqNo)
+    Client Library-->>App: return *PubAck, nil
 ```
 
-#### Go Code Example
-
+**Go Code Example**:
 ```go
-package main
-
-import (
-	"context"
-	"log"
-
-	"github.com/myproject/gRouter/pkg/messaging"
-	"go.uber.org/zap"
-)
-
-func main() {
-	logger, _ := zap.NewProduction()
-	client, _ := messaging.NewNATSClient(messaging.Config{URL: "nats://localhost:4222"}, logger)
-	client.Connect()
-	
-	// Ensure JetStream context is initialized
-	if _, err := client.JetStream(); err != nil {
-		log.Fatal(err)
-	}
-
-	pub := messaging.NewPublisher(client, "producer-service")
-	ctx := context.Background()
-
-	// Synchronous Publish
+	// Synchronous Publish - Safer, Higher Latency
 	ack, err := pub.PublishJS(ctx, "orders.critical", "OrderCreated", map[string]string{"id": "1"}, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Published to JetStream, sequence: %d", ack.Sequence)
-}
+	log.Printf("Sync Publish: Sequence %d", ack.Sequence)
 ```
+
+#### 4.2 Asynchronous Publish (PublishAsyncJS)
+
+**Function**: `PublishAsyncJS` returns a `PubAckFuture` immediately. The actual publish happens in the background. The application can continue processing and check the future later (or ignore it if occasional loss is acceptable relative to throughput). This offers high throughput.
+
+**Sequence Diagram**:
+```mermaid
+sequenceDiagram
+    participant App
+    participant Client Library
+    participant JetStream (NATS)
+
+    App->>Client Library: PublishAsyncJS(Msg)
+    Client Library->>JetStream: PUB subject <Msg>
+    Client Library-->>App: return PubAckFuture (Pending)
+    
+    par Background Process
+        Note right of JetStream: Persist Message
+        JetStream-->>Client Library: PubAck (SeqNo)
+        Note over Client Library: Future Resolved
+    and App Process
+        App->>App: Do other work...
+        App->>Client Library: Future.Ok() / Msg()
+        Client Library-->>App: return PubAck / Error
+    end
+```
+
+**Go Code Example**:
+```go
+	// Asynchronous Publish - High Throughput
+	future, err := pub.PublishAsyncJS(ctx, "orders.logs", "LogEntry", map[string]string{"level": "info"}, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	
+	// Do other work...
+	
+	// Wait for ack
+	select {
+	case <-future.Ok():
+		ack, _ := future.Msg()
+		log.Printf("Async Publish: Sequence %d", ack.Sequence)
+	case err := <-future.Err():
+		log.Printf("Async Publish Failed: %v", err)
+	}
+```
+
 
 ### 5. JetStream Push Subscription
 
@@ -664,6 +690,7 @@ nats:
 **Server Setup**:
 ```bash
 nats-server --auth "my-secret-token"
+docker run -d   --name nats   -p 4222:4222   nats:latest   --auth mysecrettoken
 ```
 
 **Client Setup**:
@@ -708,6 +735,7 @@ nats:
 **Server Setup**:
 ```bash
 nats-server --user "my-user" --pass "my-password"
+sudo docker run -d --name nats -p 4222:4222 nats:latest --user myuser --pass mypassword
 ```
 
 **Client Setup**:
@@ -750,6 +778,12 @@ nats:
 ```
 
 **Credential Generation (nsc)**:
+
+0.  **Install nsc**:
+    ```bash
+    curl -sf https://binaries.nats.dev/nats-io/nsc/v2@latest | sh
+    ls nsc
+    ```
 1.  **Initialize Operator**:
     ```bash
     nsc add operator --name my_operator
@@ -768,13 +802,26 @@ nats:
 
 **Server Setup**:
 Requires a configuration file referencing the Operator JWT and System Account.
+
+**1. Generate Config Files**:
 ```bash
-# nats-server.conf
-operator: /path/to/operator.jwt
-system_account: SYS_ACCOUNT_PUB_KEY
-resolver: MEMORY
+# Export Operator JWT
+nsc describe operator --raw > operator.jwt
+
+# Generate complete config with preloaded accounts (for MEMORY resolver)
+nsc generate config --mem-resolver --sys-account SYS --force > nats-server.conf
 ```
-Run with: `nats-server -c nats-server.conf`
+
+**2. Run Server with Docker**:
+```bash
+docker run -d --name nats-2.0 \
+  -p 4222:4222 \
+  -v $(pwd)/nats-server.conf:/nats/nats-server.conf \
+  -v $(pwd)/operator.jwt:/nats/operator.jwt \
+  nats:latest -c /nats/nats-server.conf
+```
+
+793:
 
 **Client Setup**:
 ```yaml
@@ -841,7 +888,17 @@ nats:
 
 **Server Setup**:
 ```bash
-nats-server --tls --tlscert=server.pem --tlskey=server.key --tlsca=ca.pem --tlsverify
+# Run locally
+nats-server --tls --tlscert=server.pem --tlskey=server.key --tlscacert=ca.pem --tlsverify
+
+# Run with Docker
+docker run -d --name nats-tls \
+  -p 4222:4222 \
+  -v $(pwd)/server.pem:/etc/nats/certs/server.pem \
+  -v $(pwd)/server.key:/etc/nats/certs/server.key \
+  -v $(pwd)/ca.pem:/etc/nats/certs/ca.pem \
+  nats:latest \
+  --tls --tlscert=/etc/nats/certs/server.pem --tlskey=/etc/nats/certs/server.key --tlscacert=/etc/nats/certs/ca.pem --tlsverify
 ```
 *Note: `--tlsverify` enforces mTLS (client must present a valid cert).*
 

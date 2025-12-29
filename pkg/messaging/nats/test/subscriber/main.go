@@ -10,8 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"go.uber.org/zap"
 	messaging "grouter/pkg/messaging/nats"
+
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
 )
 
 func main() {
@@ -27,13 +29,31 @@ func main() {
 	maxWorkers := flag.Int("workers", 0, "Max concurrent workers")
 	flag.Parse()
 
-	// Configuration
-	cfg := messaging.Config{
+	// Load Configuration
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath(".")
+	if err := viper.ReadInConfig(); err != nil {
+		log.Printf("Warning: Config file not found, using defaults: %v", err)
+	}
+
+	var rootCfg struct {
+		NATS messaging.Config `mapstructure:"nats"`
+	}
+
+	// Default values if config missing
+	rootCfg.NATS = messaging.Config{
 		URL:               "nats://localhost:4222",
 		MaxReconnects:     5,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
 	}
+
+	if err := viper.Unmarshal(&rootCfg); err != nil {
+		log.Fatalf("Unable to decode into struct, %v", err)
+	}
+
+	cfg := rootCfg.NATS
 
 	// Create Client
 	client, err := messaging.NewNATSClient(cfg, logger)

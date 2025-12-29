@@ -9,6 +9,7 @@ import (
 
 	messaging "grouter/pkg/messaging/nats"
 
+	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
 
@@ -20,14 +21,39 @@ func main() {
 	logger, _ := zapConfig.Build()
 	defer logger.Sync()
 
-	// Configuration
-	// Assuming NATS is running on localhost default port
-	cfg := messaging.Config{
+	// Parse flags
+	count := flag.Int("count", 1, "Number of messages to publish")
+	delay := flag.Duration("delay", 100*time.Millisecond, "Delay between messages")
+	sSubject := flag.String("subject", "gRouter.natsdemosvc.echo", "NATS subject to publish to")
+	sType := flag.String("type", "echo.request", "Message type")
+	sData := flag.String("data", "{}", "JSON data payload")
+	flag.Parse()
+
+	// Load Configuration
+	viper.SetConfigName("config")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath(".")
+	if err := viper.ReadInConfig(); err != nil {
+		log.Printf("Warning: Config file not found, using defaults: %v", err)
+	}
+
+	var rootCfg struct {
+		NATS messaging.Config `mapstructure:"nats"`
+	}
+
+	// Default values if config missing
+	rootCfg.NATS = messaging.Config{
 		URL:               "nats://localhost:4222",
 		MaxReconnects:     5,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
 	}
+
+	if err := viper.Unmarshal(&rootCfg); err != nil {
+		log.Fatalf("Unable to decode into struct, %v", err)
+	}
+
+	cfg := rootCfg.NATS
 
 	// Create Client
 	client, err := messaging.NewNATSClient(cfg, logger)
@@ -42,14 +68,6 @@ func main() {
 
 	// Create Publisher
 	pub := messaging.NewPublisher(client, "test-publisher")
-
-	// Parse flags
-	count := flag.Int("count", 1, "Number of messages to publish")
-	delay := flag.Duration("delay", 100*time.Millisecond, "Delay between messages")
-	sSubject := flag.String("subject", "gRouter.natsdemosvc.echo", "NATS subject to publish to")
-	sType := flag.String("type", "echo.request", "Message type")
-	sData := flag.String("data", "{}", "JSON data payload")
-	flag.Parse()
 
 	// Topic and Payload
 	topic := *sSubject

@@ -19,29 +19,29 @@ type Client struct {
 
 // Config holds NATS client configuration
 type Config struct {
-	URL               string
-	MaxReconnects     int
-	ReconnectWait     time.Duration
-	ConnectionTimeout time.Duration
-	Token             string
-	Username          string
-	Password          string
+	URL               string        `mapstructure:"url"`
+	MaxReconnects     int           `mapstructure:"max_reconnects"`
+	ReconnectWait     time.Duration `mapstructure:"reconnect_wait"`
+	ConnectionTimeout time.Duration `mapstructure:"connection_timeout"`
+	Token             string        `mapstructure:"token"`
+	Username          string        `mapstructure:"username"`
+	Password          string        `mapstructure:"password"`
 	// TLS configuration
-	UseTLS     bool
-	SkipVerify bool
-	CAFile     string
-	CertFile   string
-	KeyFile    string
+	UseTLS     bool   `mapstructure:"use_tls"`
+	SkipVerify bool   `mapstructure:"skip_verify"`
+	CAFile     string `mapstructure:"ca_file"`
+	CertFile   string `mapstructure:"cert_file"`
+	KeyFile    string `mapstructure:"key_file"`
 	// NATS 2.0+ Credentials
-	CredsFile string
+	CredsFile string `mapstructure:"creds_file"`
 	// Metrics configuration
-	Metrics MetricsConfig
+	Metrics MetricsConfig `mapstructure:"metrics"`
 }
 
 // MetricsConfig holds configuration for metrics
 type MetricsConfig struct {
-	Enabled bool
-	Path    string
+	Enabled bool   `mapstructure:"enabled"`
+	Path    string `mapstructure:"path"`
 }
 
 // NewNATSClient creates a new NATS client
