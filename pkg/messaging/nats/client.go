@@ -36,12 +36,26 @@ type Config struct {
 	CredsFile string `mapstructure:"creds_file"`
 	// Metrics configuration
 	Metrics MetricsConfig `mapstructure:"metrics"`
+	// Logging configuration
+	Logging LoggingConfig `mapstructure:"logging"`
+	// Tracing configuration
+	Tracing TracingConfig `mapstructure:"tracing"`
 }
 
 // MetricsConfig holds configuration for metrics
 type MetricsConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Path    string `mapstructure:"path"`
+}
+
+// LoggingConfig holds configuration for logging
+type LoggingConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+}
+
+// TracingConfig holds configuration for tracing
+type TracingConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // NewNATSClient creates a new NATS client

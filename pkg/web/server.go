@@ -95,9 +95,23 @@ func InitEngine(cfg Config, logger *zap.Logger) *gin.Engine {
 		if cfg.Security.ContentSecurityPolicy != "" {
 			secureConfig.ContentSecurityPolicy = cfg.Security.ContentSecurityPolicy
 		}
+
 		if cfg.Security.ReferrerPolicy != "" {
 			secureConfig.ReferrerPolicy = cfg.Security.ReferrerPolicy
 		}
+
+		// Disable SSL Redirect if TLS is not enabled
+		if !cfg.TLS.Enabled {
+			secureConfig.SSLRedirect = false
+		} else {
+			secureConfig.SSLRedirect = true
+		}
+
+		// If in development/debug mode, we might want to relax some security settings
+		if cfg.Mode == "debug" {
+			secureConfig.IsDevelopment = true
+		}
+
 		engine.Use(secure.New(secureConfig))
 	}
 
@@ -223,6 +237,10 @@ func (s *Server) ResetEngine(ctx context.Context) error {
 	time.Sleep(1 * time.Second)
 
 	s.engine = InitEngine(s.cfg, s.logger)
+	if s.health != nil {
+		s.engine.GET("/health/live", s.health.LivenessHandler)
+		s.engine.GET("/health/ready", s.health.ReadinessHandler)
+	}
 	return nil
 }
 

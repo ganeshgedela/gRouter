@@ -9,6 +9,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
@@ -93,6 +94,36 @@ func PublisherLoggingMiddleware(logger *zap.Logger) PublisherMiddleware {
 	}
 }
 
+// RequestLoggingMiddleware returns a middleware that logs request-reply interactions
+func RequestLoggingMiddleware(logger *zap.Logger) RequestMiddleware {
+	return func(next RequestFunc) RequestFunc {
+		return func(ctx context.Context, subject string, msgType string, data interface{}, timeout time.Duration) (*MessageEnvelope, error) {
+			start := time.Now()
+			resp, err := next(ctx, subject, msgType, data, timeout)
+			duration := time.Since(start)
+
+			fields := []zap.Field{
+				zap.String("subject", subject),
+				zap.String("type", msgType),
+				zap.Duration("duration", duration),
+			}
+
+			if err != nil {
+				logger.Error("Request failed", append(fields, zap.Error(err))...)
+			} else {
+				logger.Debug("Request completed successfully",
+					append(fields,
+						zap.String("response_id", resp.ID),
+						zap.String("response_type", resp.Type),
+					)...,
+				)
+			}
+
+			return resp, err
+		}
+	}
+}
+
 // --- Metrics Middleware ---
 
 // MetricsMiddleware returns a middleware that tracks message processing metrics
@@ -137,6 +168,29 @@ func PublisherMetricsMiddleware() PublisherMiddleware {
 	}
 }
 
+// RequestMetricsMiddleware returns a middleware that tracks request metrics
+func RequestMetricsMiddleware() RequestMiddleware {
+	return func(next RequestFunc) RequestFunc {
+		return func(ctx context.Context, subject string, msgType string, data interface{}, timeout time.Duration) (*MessageEnvelope, error) {
+			start := time.Now()
+			resp, err := next(ctx, subject, msgType, data, timeout)
+			duration := time.Since(start)
+
+			status := "success"
+			if err != nil {
+				status = "error"
+			}
+
+			// We reuse the publish metrics, or we could create request specific ones.
+			// Reusing fits the "publish" concept (we are publishing a request).
+			publishCounter.WithLabelValues(subject, msgType, status).Inc()
+			publishDuration.WithLabelValues(subject, msgType).Observe(duration.Seconds())
+
+			return resp, err
+		}
+	}
+}
+
 // --- Tracing Middleware ---
 
 // metadataCarrier implements propagation.TextMapCarrier for MessageEnvelope.Metadata
@@ -172,13 +226,15 @@ func TracingMiddleware(tracer trace.Tracer) SubscriberMiddleware {
 			ctx = propagator.Extract(ctx, metadataCarrier(env.Metadata))
 
 			// Start span
-			ctx, span := tracer.Start(ctx, fmt.Sprintf("messaging.receive %s", subject),
+			ctx, span := tracer.Start(ctx, spanNameProcess+" "+subject,
 				trace.WithSpanKind(trace.SpanKindConsumer),
 				trace.WithAttributes(
-					attribute.String("messaging.subject", subject),
-					attribute.String("messaging.message_id", env.ID),
-					attribute.String("messaging.message_type", env.Type),
+					semconv.MessagingSystem(systemName),
+					semconv.MessagingDestinationName(subject),
+					semconv.MessagingOperationProcess,
+					semconv.MessagingMessageID(env.ID),
 					attribute.String("messaging.source", env.Source),
+					attribute.String("messaging.message_type", env.Type),
 				),
 			)
 			defer span.End()
@@ -224,6 +280,41 @@ func PublisherTracingMiddleware(tracer trace.Tracer) PublisherMiddleware {
 			}
 
 			return err
+		}
+	}
+}
+
+// RequestTracingMiddleware returns a middleware that injects trace context into request metadata
+func RequestTracingMiddleware(tracer trace.Tracer) RequestMiddleware {
+	return func(next RequestFunc) RequestFunc {
+		return func(ctx context.Context, subject string, msgType string, data interface{}, timeout time.Duration) (*MessageEnvelope, error) {
+			// Start span
+			ctx, span := tracer.Start(ctx, fmt.Sprintf("messaging.request %s", subject),
+				trace.WithSpanKind(trace.SpanKindProducer),
+				trace.WithAttributes(
+					attribute.String("messaging.subject", subject),
+					attribute.String("messaging.message_type", msgType),
+					attribute.String("messaging.operation", "request"),
+				),
+			)
+			defer span.End()
+
+			// Note: Similar to PublisherTracingMiddleware, we cannot easily inject metadata
+			// into the envelope here without refactoring. The envelope is created inside `next` (the p.request method).
+			// However, unlike Publish, Request waits for a response.
+
+			resp, err := next(ctx, subject, msgType, data, timeout)
+			if err != nil {
+				span.RecordError(err)
+				span.SetAttributes(attribute.String("error", err.Error()))
+			} else {
+				span.SetAttributes(
+					attribute.String("messaging.response_id", resp.ID),
+					attribute.String("messaging.response_type", resp.Type),
+				)
+			}
+
+			return resp, err
 		}
 	}
 }

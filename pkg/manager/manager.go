@@ -124,6 +124,12 @@ func (m *ServiceManager) InitNATS() error {
 			Enabled: m.cfg.NATS.Metrics.Enabled,
 			Path:    m.cfg.NATS.Metrics.Path,
 		},
+		Logging: messaging.LoggingConfig{
+			Enabled: m.cfg.NATS.Logging.Enabled,
+		},
+		Tracing: messaging.TracingConfig{
+			Enabled: m.cfg.Tracing.Enabled,
+		},
 	}, m.log, m.cfg.App.Name); err != nil {
 		return fmt.Errorf("failed to initialize messenger: %w", err)
 	}

@@ -2,17 +2,21 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"grouter/pkg/config"
 	messaging "grouter/pkg/messaging/nats"
+	"grouter/pkg/telemetry"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +42,8 @@ func main() {
 	}
 
 	var rootCfg struct {
-		NATS messaging.Config `mapstructure:"nats"`
+		NATS    messaging.Config     `mapstructure:"nats"`
+		Tracing config.TracingConfig `mapstructure:"tracing"`
 	}
 
 	// Default values if config missing
@@ -55,6 +60,22 @@ func main() {
 
 	cfg := rootCfg.NATS
 
+	// Create Tracing Config locally for this test
+	tracingCfg := rootCfg.Tracing
+	if tracingCfg.ServiceName == "" {
+		tracingCfg.ServiceName = "nats-subscriber"
+	}
+	if tracingCfg.Exporter == "" {
+		tracingCfg.Exporter = "stdout"
+	}
+
+	// Initialize Tracer
+	shutdown, err := telemetry.InitTracer(tracingCfg)
+	if err != nil {
+		log.Printf("Failed to init tracer: %v", err)
+	}
+	defer shutdown(context.Background())
+
 	// Create Client
 	client, err := messaging.NewNATSClient(cfg, logger)
 	if err != nil {
@@ -68,6 +89,17 @@ func main() {
 
 	// Create Subscriber
 	sub := messaging.NewSubscriber(client, "test-subscriber")
+	// Use Logging Middleware
+	sub.Use(messaging.LoggingMiddleware(logger))
+
+	// Use Metrics Middleware (if enabled in config, though we force enabled in this test logic for now or check rootCfg if available)
+	// We will just enable it to test
+	sub.Use(messaging.MetricsMiddleware())
+
+	if cfg.Tracing.Enabled {
+		tracer := otel.Tracer("nats-subscriber")
+		sub.Use(messaging.TracingMiddleware(tracer))
+	}
 
 	// Subscribe to all topics for gRouter
 	topic := "gRouter.>"
@@ -77,10 +109,23 @@ func main() {
 		zap.Int("max_workers", *maxWorkers),
 	)
 
+	// Start Metrics Server
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		logger.Info("Metrics server starting on :8081")
+		if err := http.ListenAndServe(":8081", nil); err != nil {
+			logger.Error("Metrics server failed", zap.Error(err))
+		}
+	}()
+
+	// Create Publisher for replies
+	pub := messaging.NewPublisher(client, "test-subscriber")
+
 	// Create handler with dependencies
 	handler := &Handler{
-		client: client,
-		logger: logger,
+		client:    client,
+		logger:    logger,
+		publisher: pub,
 	}
 
 	opts := &messaging.SubscribeOptions{
@@ -106,8 +151,9 @@ func main() {
 
 // Handler encapsulates message handling logic and dependencies
 type Handler struct {
-	client *messaging.Client
-	logger *zap.Logger
+	client    *messaging.Client
+	logger    *zap.Logger
+	publisher messaging.Publisher
 }
 
 // HandleMessage processes incoming NATS messages
@@ -124,19 +170,12 @@ func (h *Handler) HandleMessage(ctx context.Context, subject string, env *messag
 		h.logger.Info("Received request, sending reply", zap.String("reply_to", env.Reply))
 		// Echo back
 		responseData := map[string]string{"reply": "echo response"}
-		dataBytes, _ := json.Marshal(responseData)
 
-		responseEnvelope := &messaging.MessageEnvelope{
-			ID:        "response-id",
-			Type:      "echo.response",
-			Source:    "test-subscriber",
-			Timestamp: time.Now(),
-			Data:      dataBytes,
-		}
-		respBytes, _ := json.Marshal(responseEnvelope)
-
-		// Using client connection directly
-		if err := h.client.Conn().Publish(env.Reply, respBytes); err != nil {
+		// Use the Publisher interface to send the reply
+		// We use Publish (Sync) or PublishAsync depending on need.
+		// Since it is a reply, we usually want it to go out quickly.
+		// Note: The subject is env.Reply.
+		if err := h.publisher.Publish(ctx, env.Reply, "echo.response", responseData, nil); err != nil {
 			h.logger.Error("Failed to reply", zap.Error(err))
 		} else {
 			h.logger.Info("Reply sent")

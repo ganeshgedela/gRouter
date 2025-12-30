@@ -57,6 +57,10 @@ func (m *mockPublisher) Use(mw ...messaging.PublisherMiddleware) {
 	// no-op for mock
 }
 
+func (m *mockPublisher) UseRequest(mw ...messaging.RequestMiddleware) {
+	// no-op for mock
+}
+
 func (m *mockPublisher) SetValidator(v messaging.Validator) {
 	// no-op for mock
 }

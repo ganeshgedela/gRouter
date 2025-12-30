@@ -7,6 +7,7 @@ import (
 	"grouter/pkg/config"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -28,6 +29,17 @@ func InitTracer(cfg config.TracingConfig) (func(context.Context) error, error) {
 		exporter, err = stdouttrace.New(
 			stdouttrace.WithPrettyPrint(),
 		)
+	case "otlp", "jaeger":
+		// Use OTLP HTTP exporter
+		// We use WithInsecure() for local development/Jaeger
+		opts := []otlptracehttp.Option{
+			otlptracehttp.WithInsecure(),
+		}
+		if cfg.Endpoint != "" {
+			// Endpoint should be like "http://localhost:4318"
+			opts = append(opts, otlptracehttp.WithEndpointURL(cfg.Endpoint))
+		}
+		exporter, err = otlptracehttp.New(context.Background(), opts...)
 	default:
 		// Default to no-op if unknown or empty, strictly speaking we could error but
 		// for now let's just default to stdout or return error

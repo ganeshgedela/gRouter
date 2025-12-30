@@ -481,116 +481,86 @@ sequenceDiagram
 ```
 
 
-### 5. JetStream Push Subscription
+### 5. JetStream Subscription Patterns
 
-With push subscriptions, the server pushes messages to the client. This is similar to core NATS but with persistence, replays, and explicit acknowledgements.
+#### 5.1 Push Subscription (SubscribePush)
 
-#### Sequence Diagram
+**Function**: `SubscribePush` delegates message flow to the NATS server. The server "pushes" messages to the client library as fast as possible (subject to flow control). This is similar to standard NATS subscriptions but with JetStream guarantees (persistence, replay).
 
+**Sequence Diagram**:
 ```mermaid
 sequenceDiagram
-    participant JetStream
     participant Subscriber
+    participant Client Library
+    participant JetStream (NATS)
 
-    JetStream->>Subscriber: Deliver(Msg)
-    Note over Subscriber: Process Message
-    Subscriber->>JetStream: Ack()
-    Note left of JetStream: Mark handled
+    Subscriber->>Client Library: SubscribePush(subject, handler)
+    Client Library->>JetStream: CREATE Consumer (Push Mode)
+    Note over JetStream: Server controls delivery rate
+    
+    loop Message Delivery
+        JetStream->>Client Library: MSG (Push)
+        Client Library->>Subscriber: handler(Env)
+        Subscriber-->>Client Library: return error/nil
+        
+        alt Success (nil)
+            Client Library->>JetStream: Ack()
+        else Failure (err)
+            Client Library->>JetStream: Nak()
+        end
+    end
 ```
 
-#### Go Code Example
-
+**Go Code Example**:
 ```go
-package main
-
-import (
-	"context"
-	"log"
-
-	"github.com/nats-io/nats.go"
-	"github.com/myproject/gRouter/pkg/messaging"
-	"go.uber.org/zap"
-)
-
-func main() {
-	logger, _ := zap.NewProduction()
-	client, _ := messaging.NewNATSClient(messaging.Config{URL: "nats://localhost:4222"}, logger)
-	client.Connect()
-
-	sub := messaging.NewSubscriber(client, "consumer-service")
-	
-	// Subscribe with a durable consumer name to tolerate disconnects
+	// Push Subscription - Server Pushes Messages
 	err := sub.SubscribePush("orders.critical", func(ctx context.Context, subject string, env *messaging.MessageEnvelope) error {
 		log.Printf("Processing critical order: %s", env.ID)
 		// Return nil automatically sends Ack
 		return nil
 	}, nats.Durable("order-processor"))
-
-	if err != nil {
-		log.Fatal(err)
-	}
-}
 ```
 
-### 6. JetStream Pull Subscription (Worker Pattern)
 
-Pull subscriptions allow the client to control the flow of data by asking for a batch of messages when it is ready. This is ideal for batch processing or when downstream systems have rate limits.
+#### 5.2 Pull Subscription (SubscribePull)
 
-#### Sequence Diagram
+**Function**: `SubscribePull` gives the client control. The client "pulls" batches of messages when it is ready. This is ideal for batch processing ("Worker Pattern") or when the consumer needs to handle heavy loads without being overwhelmed by a push stream.
 
+**Sequence Diagram**:
 ```mermaid
 sequenceDiagram
-    participant Subscriber
-    participant JetStream
+    participant Worker (App)
+    participant Client Library
+    participant JetStream (NATS)
 
-    loop Worker Loop
-        Subscriber->>JetStream: Fetch(BatchSize)
-        JetStream->>Subscriber: Return Batch [Msg1, Msg2...]
-        Note over Subscriber: Process Messages
-        Subscriber->>JetStream: Ack(Msg1)
-        Subscriber->>JetStream: Ack(Msg2)
+    Worker->>Client Library: SubscribePull(subject, durable, handler)
+    Client Library->>JetStream: CREATE Consumer (Pull Mode)
+    
+    loop Fetch Loop (Managed by Library)
+        Client Library->>JetStream: Fetch(BatchSize)
+        JetStream-->>Client Library: Return Batch [Msg1, Msg2...]
+        
+        loop For Each Message
+            Client Library->>Worker: handler(Env)
+            Worker-->>Client Library: return result
+            Client Library->>JetStream: Ack/Nak
+        end
     end
 ```
 
-#### Go Code Example
-
+**Go Code Example**:
 ```go
-package main
-
-import (
-	"context"
-	"log"
-	"time"
-
-	"github.com/myproject/gRouter/pkg/messaging"
-	"go.uber.org/zap"
-)
-
-func main() {
-	logger, _ := zap.NewProduction()
-	client, _ := messaging.NewNATSClient(messaging.Config{URL: "nats://localhost:4222"}, logger)
-	client.Connect()
-
-	sub := messaging.NewSubscriber(client, "worker-service")
-
-	// The library handles the fetch loop in a background goroutine
+	// Pull Subscription - Client Pulls Messages (Worker Pattern)
 	err := sub.SubscribePull("jobs.heavy", "heavy-job-processor", func(ctx context.Context, subject string, env *messaging.MessageEnvelope) error {
 		log.Printf("Processing heavy job: %s", env.ID)
-		time.Sleep(100 * time.Millisecond) // Simulate work
+		time.Sleep(100 * time.Millisecond) // Simulate heavy work
 		return nil
 	}, 
 		messaging.WithBatchSize(10),
 		messaging.WithFetchTimeout(5*time.Second),
 	)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Keep main thread alive
-	select {}
-}
 ```
+
 
 ### 7. Middleware Sequential Flow
 
@@ -1013,3 +983,234 @@ func main() {
 	// err = js.DeleteStream("ORDERS")
 }
 ```
+
+### 10. Supported Middleware Services
+
+The library provides built-in middleware factories in `pkg/messaging/nats/middleware.go` for common observability patterns.
+
+#### 10.1 Logging Middleware
+
+**Functions**: `LoggingMiddleware` (Subscriber), `PublisherLoggingMiddleware` (Publisher)
+**Purpose**: Logs the details (Subject, ID, Type), duration, and outcome of every message processed or published.
+
+**Sequence Diagram**:
+```mermaid
+sequenceDiagram
+    participant App
+    participant Middleware as LoggingMW
+    participant Handler as Next Handler
+    
+    App->>Middleware: Handle(Ctx, Msg)
+    Note over Middleware: Start Timer
+    
+    Middleware->>Handler: Handle(Ctx, Msg)
+    Handler-->>Middleware: Return err
+    
+    Note over Middleware: Stop Timer
+    
+    alt Error
+        Middleware->>Logs: ERROR "Message processing failed" (duration, fields...)
+    else Success
+        Middleware->>Logs: INFO "Message processed successfully" (duration, fields...)
+    end
+    
+    Middleware-->>App: Return err
+```
+
+#### 10.2 Metrics Middleware
+
+**Functions**: `MetricsMiddleware` (Subscriber), `PublisherMetricsMiddleware` (Publisher)
+**Purpose**: Collects Prometheus metrics for monitoring system health and performance.
+*   **Counters**: `messaging_subscribe_total`, `messaging_publish_total` (Labels: subject, type, status)
+*   **Histograms**: `messaging_subscribe_duration_seconds`, `messaging_publish_duration_seconds`
+
+**Sequence Diagram**:
+```mermaid
+sequenceDiagram
+    participant App
+    participant Middleware as MetricsMW
+    participant Handler as Next Handler
+    participant Prom as Prometheus
+    
+    App->>Middleware: Handle(Ctx, Msg)
+    Note over Middleware: Start Timer
+    
+    Middleware->>Handler: Handle(Ctx, Msg)
+    Handler-->>Middleware: Return err
+    
+    Note over Middleware: Calc Duration
+    
+    alt Error
+        Note over Middleware: status="error"
+    else Success
+        Note over Middleware: status="success"
+    end
+    
+    Middleware->>Prom: Counter.Inc(status...)
+    Middleware->>Prom: Histogram.Observe(duration)
+    
+    Middleware-->>App: Return err
+```
+
+#### 10.3 Tracing Middleware
+
+**Functions**: `TracingMiddleware` (Subscriber), `PublisherTracingMiddleware` (Publisher)
+**Purpose**: Integrates with OpenTelemetry (OTEL) for distributed tracing.
+*   **Subscriber**: Extracts parent span context from `MessageEnvelope.Metadata` and starts a new `messaging.receive` span.
+*   **Publisher**: Starts a new `messaging.send` span.
+
+**Sequence Diagram**:
+```mermaid
+sequenceDiagram
+    participant App
+    participant Middleware as TracingMW
+    participant Handler as Next Handler
+    participant Tracer as OTEL Tracer
+    
+    App->>Middleware: Handle(Ctx, Msg)
+    
+    Note over Middleware: Extract Context from Msg.Metadata
+    Middleware->>Tracer: StartSpan("messaging.receive", ParentCtx)
+    Tracer-->>Middleware: NewCtx, Span
+    
+    Middleware->>Handler: Handle(NewCtx, Msg)
+    Handler-->>Middleware: Return err
+    
+    alt Error
+        Middleware->>Tracer: Span.RecordError(err)
+    end
+    
+    Middleware->>Tracer: Span.End()
+    
+    Middleware-->>App: Return err
+```
+
+
+## 9. Testing Distributed Tracing
+
+This section explains how to verify distributed tracing in your NATS-based services using OpenTelemetry.
+
+### 9.1 Tracing Flow
+
+The following sequence diagram illustrates how trace context is propagated across NATS messages.
+
+#### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant SDK as Tracing SDK (Otel)
+    participant Pub as NATS Publisher
+    participant NATS as NATS Server
+    participant Sub as NATS Subscriber
+    participant Jaeger as Jaeger Collector
+
+    Note over App: Start Trace
+    App->>SDK: Start Span ("api_request")
+    activate SDK
+    
+    App->>Pub: Publish(ctx, Msg)
+    activate Pub
+    Pub->>SDK: Start Child Span ("messaging.send")
+    Pub->>Pub: Inject Trace Context into Msg Headers
+    Pub->>NATS: PUB subject [Headers: TraceParent]
+    Pub->>SDK: End Child Span
+    Pub->>Jaeger: Export Span ("messaging.send")
+    deactivate Pub
+
+    NATS->>Sub: MSG subject [Headers: TraceParent]
+    
+    activate Sub
+    Sub->>Sub: Extract Trace Context from Headers
+    Sub->>SDK: Start Child Span ("messaging.receive")
+    Sub->>App: Handler(ctx, Msg)
+    App->>SDK: Do Work / Start Spans
+    Sub->>SDK: End Child Span
+    Sub->>Jaeger: Export Span ("messaging.receive")
+    deactivate Sub
+
+    App->>SDK: End Span ("api_request")
+    deactivate SDK
+    App->>Jaeger: Export Span ("api_request")
+```
+
+### 9.2 Testing with Console (Stdout)
+
+This is the simplest way to verify that your service is generating spans.
+
+1.  **Configure Service**:
+    Ensure your `config.yaml` has tracing enabled with `stdout` exporter.
+    ```yaml
+    tracing:
+      enabled: true
+      service_name: "natsdemosvc"
+      exporter: "stdout"
+    nats:
+      tracing:
+        enabled: true
+    ```
+
+2.  **Run Service**:
+    ```bash
+    go run cmd/main.go
+    ```
+
+3.  **Generate Traffic**:
+    Send a message via CLI.
+    ```bash
+    nats pub natsdemosvc.natdemo.create '{"type": "natdemo.create", "id": "1", "data": {}, "source": "cli"}'
+    ```
+
+4.  **Verify Output**:
+    Check the terminal running the service. You should see JSON output representing spans:
+    ```json
+    {
+      "Name": "messaging.receive natsdemosvc.natdemo.create",
+      "SpanContext": {
+        "TraceID": "...",
+        "SpanID": "..."
+      },
+      "Attributes": [
+        {"Key": "messaging.subject", "Value": "natsdemosvc.natdemo.create"}
+      ]
+    }
+    ```
+
+### 9.3 Testing with Jaeger (UI)
+
+For visual inspection of traces.
+
+1.  **Start Jaeger**:
+    ```bash
+    docker run -d --name jaeger \
+                -e COLLECTOR_ZIPKIN_HOST_PORT=:9411 \
+                -p 5775:5775/udp \
+                -p 6831:6831/udp \
+                -p 6832:6832/udp \
+                -p 5778:5778 \
+                -p 16686:16686 \
+                -p 14268:14268 \
+                -p 14250:14250 \
+                -p 9411:9411 \
+                -p 4317:4317 \
+                -p 4318:4318 \
+                jaegertracing/all-in-one:1.60
+    ```
+
+2.  **Configure Service**:
+    Update `config.yaml` to point to Jaeger (ensure your code supports Jaeger/OTLP exporter, commonly via HTTP/GRPC).
+    ```yaml
+    tracing:
+      enabled: true
+      exporter: "jaeger" # mapped to OTLP internally
+      endpoint: "http://localhost:4318" # Jaeger OTLP HTTP port
+    ```
+
+3.  **Run & Generate Traffic**:
+    Same as above.
+
+4.  **Verify in UI**:
+    *   Open [http://localhost:16686](http://localhost:16686).
+    *   Select Service: `natsdemosvc`.
+    *   Click **Find Traces**.
+    *   You should see a trace showing the flow from Publisher -> Subscriber.

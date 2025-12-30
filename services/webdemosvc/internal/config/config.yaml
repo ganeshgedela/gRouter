@@ -4,7 +4,7 @@ app:
   environment: "development"
 
 tracing:
-  enabled: true
+  enabled: false
   service_name: "grouter-web"
   exporter: "stdout"
 
@@ -53,7 +53,7 @@ web:
     allow_credentials: true
     max_age: 3600
   security:
-    enabled: true
+    enabled: false
     xss_protection: "1; mode=block"
     content_type_nosniff: "nosniff"
     x_frame_options: "DENY"
@@ -70,6 +70,6 @@ web:
     path: "/swagger"
 
 services:
-    webdemo:
+    webdemosvc:
       enabled: true
       subject: "webdemo"

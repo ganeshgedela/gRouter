@@ -1,0 +1,164 @@
+version: '3.8'
+
+services:
+  # NATS Server with JetStream enabled
+  nats:
+    image: nats:latest
+    container_name: nats-server
+    command: -js -m 8222
+    ports:
+      - "4222:4222" # Client Port
+      - "8222:8222" # Monitoring Port
+    networks:
+      - grouter-net
+
+  # Jaeger All-in-One (UI, Collector, Query)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=:9411
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+      - "14268:14268" # Thrift
+      - "14250:14250" # Model
+      - "9411:9411" # Zipkin
+    networks:
+      - grouter-net
+
+  # Prometheus for Metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - grouter-net
+    depends_on:
+      - jaeger
+
+  # Grafana for Visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - grouter-net
+    depends_on:
+      - prometheus
+
+  # OpenSearch (Log Storage)
+  opensearch:
+    image: opensearchproject/opensearch:latest
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" # Limit heap size for local dev
+      - DISABLE_SECURITY_PLUGIN=true # Simplify local dev
+    ports:
+      - "9200:9200"
+      - "9600:9600"
+    networks:
+      - grouter-net
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+
+  # OpenSearch Dashboards (Log Visualization)
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:latest
+    container_name: opensearch-dashboards
+    ports:
+      - "5601:5601"
+    environment:
+      - 'OPENSEARCH_HOSTS=["http://opensearch:9200"]'
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    networks:
+      - grouter-net
+    depends_on:
+      - opensearch
+
+  # Fluentd (Log Collector)
+  fluentd:
+    build: ./config/fluentd
+    container_name: fluentd
+    volumes:
+      - ./config/fluentd/fluent.conf:/fluentd/etc/fluent.conf
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+      - "9880:9880"
+    networks:
+      - grouter-net
+
+  # Web Demo Service
+  webdemosvc:
+    build:
+      context: ../../
+      dockerfile: services/webdemosvc/Dockerfile
+    container_name: webdemosvc
+    environment:
+      - GROUTER_NATS_URL=nats://nats:4222
+      - GROUTER_NATS_ENABLED=true
+      - GROUTER_WEB_PORT=8081
+      - GROUTER_LOG_LEVEL=info
+    ports:
+      - "8081:8081"
+    depends_on:
+      - nats
+      - fluentd
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "localhost:24224"
+        tag: "webdemosvc"
+    networks:
+      - grouter-net
+
+  # NATS Demo Service
+  natsdemosvc:
+    build:
+      context: ../../
+      dockerfile: services/natsdemosvc/Dockerfile
+    container_name: natsdemosvc
+    environment:
+      - GROUTER_NATS_URL=nats://nats:4222
+      - GROUTER_WEB_PORT=8082
+      - GROUTER_LOG_LEVEL=info
+    ports:
+      - "8082:8082"
+    depends_on:
+      - nats
+      - fluentd
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: "localhost:24224"
+        tag: "natsdemosvc"
+    networks:
+      - grouter-net
+
+volumes:
+  opensearch-data:
+
+
+networks:
+  grouter-net:
+    driver: bridge

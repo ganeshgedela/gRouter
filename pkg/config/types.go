@@ -38,6 +38,12 @@ type NATSConfig struct {
 	CertFile          string        `mapstructure:"cert_file"`
 	KeyFile           string        `mapstructure:"key_file"`
 	Metrics           MetricsConfig `mapstructure:"metrics"`
+	Logging           LoggingConfig `mapstructure:"logging"`
+}
+
+// LoggingConfig holds configuration for logging middleware
+type LoggingConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // LogConfig holds logging configuration

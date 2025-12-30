@@ -3,6 +3,7 @@ package nats
 import (
 	"fmt"
 
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -45,8 +46,26 @@ func (m *Messenger) Init(cfg Config, logger *zap.Logger, source string) error {
 	// Enable metrics middleware if configured
 	if cfg.Metrics.Enabled {
 		m.Publisher.Use(PublisherMetricsMiddleware())
+		m.Publisher.UseRequest(RequestMetricsMiddleware())
 		m.Subscriber.Use(MetricsMiddleware())
 		logger.Info("Metrics middleware enabled for NATS")
+	}
+
+	// Enable Logging Middleware
+	if cfg.Logging.Enabled {
+		m.Publisher.Use(PublisherLoggingMiddleware(logger))
+		m.Publisher.UseRequest(RequestLoggingMiddleware(logger))
+		m.Subscriber.Use(LoggingMiddleware(logger))
+		logger.Info("Logging middleware enabled for NATS")
+	}
+
+	// Enable Tracing Middleware
+	if cfg.Tracing.Enabled {
+		tracer := otel.Tracer("nats")
+		m.Publisher.Use(PublisherTracingMiddleware(tracer))
+		m.Publisher.UseRequest(RequestTracingMiddleware(tracer))
+		m.Subscriber.Use(TracingMiddleware(tracer))
+		logger.Info("Tracing middleware enabled for NATS")
 	}
 
 	return nil

@@ -36,6 +36,9 @@ func (a *App) Init() error {
 	if err := a.manager.InitNATS(); err != nil {
 		return err
 	}
+	if err := a.manager.InitWebServer(); err != nil {
+		return err
+	}
 	// Generate unique AppId
 	a.AppId = a.manager.Config().App.Name + "-" + strings.Split(uuid.New().String(), "-")[0]
 	a.manager.Logger().Info("App initialized", zap.String("AppId", a.AppId))
@@ -192,6 +195,7 @@ func (a *App) RegisterServices() error {
 	if err := a.manager.SubscribeToTopics(topic, cfg.App.Name); err != nil {
 		return err
 	}
+
 	logger.Info("Registering service: " + a.GetAppName() + " to topic: " + topic)
 
 	// build services list from cfg.Services

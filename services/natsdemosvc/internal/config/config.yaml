@@ -4,7 +4,7 @@ app:
   environment: "development"
 
 tracing:
-  enabled: false
+  enabled: true
   service_name: "natsdemosvc"
   exporter: "stdout"
 
@@ -25,6 +25,10 @@ nats:
   key_file: ""
   metrics:
     enabled: true
+  logging:
+    enabled: true
+  tracing:
+    enabled: true
 
 log:
   level: "info"
@@ -32,8 +36,8 @@ log:
   output_path: "stdout"
 
 web:
-  enabled: false
-  port: 8080
+  enabled: true
+  port: 8082
   read_timeout: 10s
   write_timeout: 10s
   shutdown_timeout: 5s

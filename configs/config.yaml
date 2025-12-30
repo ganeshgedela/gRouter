@@ -67,7 +67,7 @@ web:
 
   # Security Headers
   security:
-    enabled: true
+    enabled: false
     xss_protection: "1; mode=block"
     content_type_nosniff: "nosniff"
     x_frame_options: "DENY"

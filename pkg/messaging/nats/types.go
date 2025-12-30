@@ -48,6 +48,7 @@ type Publisher interface {
 	PublishJS(ctx context.Context, subject string, msgType string, data interface{}, opts ...nats.PubOpt) (*nats.PubAck, error)
 	PublishAsyncJS(ctx context.Context, subject string, msgType string, data interface{}, opts ...nats.PubOpt) (nats.PubAckFuture, error)
 	Use(mw ...PublisherMiddleware)
+	UseRequest(mw ...RequestMiddleware)
 	SetValidator(v Validator)
 }
 
@@ -74,6 +75,12 @@ type PublisherMiddleware func(next PublisherFunc) PublisherFunc
 
 // PublisherFunc is the function signature for publishing messages.
 type PublisherFunc func(ctx context.Context, subject string, msgType string, data interface{}, opts *PublishOptions) error
+
+// RequestMiddleware defines the middleware for request-reply messaging.
+type RequestMiddleware func(next RequestFunc) RequestFunc
+
+// RequestFunc is the function signature for request-reply messaging.
+type RequestFunc func(ctx context.Context, subject string, msgType string, data interface{}, timeout time.Duration) (*MessageEnvelope, error)
 
 // SubscriberMiddleware defines the middleware for subscribing to messages.
 type SubscriberMiddleware func(next HandlerFunc) HandlerFunc

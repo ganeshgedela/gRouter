@@ -39,7 +39,7 @@ func main() {
 
 	// 2. Health Check (Proof of Life)
 	log.Println("2. Sending Health Expecting Reply...")
-	healthSubject := "gRouter.health" // Router routes 'health' -> HealthService
+	healthSubject := "natsdemosvc.health.check" // Router routes 'health' -> HealthService
 	replySubject := "verifier.reply.health"
 
 	sub, err := nc.SubscribeSync(replySubject)
@@ -49,7 +49,7 @@ func main() {
 
 	env := MessageEnvelope{
 		ID:        "verify-health",
-		Type:      "liveness",
+		Type:      "health.live",
 		Reply:     replySubject,
 		Timestamp: time.Now(),
 	}

@@ -9,8 +9,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"go.opentelemetry.io/otel"
-	semconv "go.opentelemetry.io/otel/semconv/v1.17.0"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
@@ -47,9 +45,6 @@ func (s *NATSSubscriber) SetValidator(v Validator) {
 
 // Subscribe subscribes to a subject with a handler
 func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *SubscribeOptions) error {
-	if !s.client.IsConnected() {
-		return fmt.Errorf("not connected to NATS")
-	}
 
 	// Setup concurrency control if MaxWorkers is set
 	var sem chan struct{}
@@ -79,18 +74,6 @@ func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *Su
 
 		// Extract trace context
 		ctx := otel.GetTextMapPropagator().Extract(context.Background(), metadataCarrier(envelope.Metadata))
-
-		// Start Span
-		ctx, span := tracer.Start(ctx, spanNameProcess+" "+msg.Subject,
-			trace.WithSpanKind(trace.SpanKindConsumer),
-			trace.WithAttributes(
-				semconv.MessagingSystem(systemName),
-				semconv.MessagingDestinationName(msg.Subject),
-				semconv.MessagingOperationProcess,
-				semconv.MessagingMessageID(envelope.ID),
-			),
-		)
-		defer span.End()
 
 		// ✅ capture NATS reply subject for request-reply
 		if msg.Reply != "" {
@@ -206,18 +189,6 @@ func (s *NATSSubscriber) SubscribePush(subject string, handler HandlerFunc, opts
 
 		// Extract trace context
 		ctx := otel.GetTextMapPropagator().Extract(context.Background(), metadataCarrier(envelope.Metadata))
-
-		// Start Span
-		ctx, span := tracer.Start(ctx, spanNameProcess+" "+msg.Subject,
-			trace.WithSpanKind(trace.SpanKindConsumer),
-			trace.WithAttributes(
-				semconv.MessagingSystem(systemName),
-				semconv.MessagingDestinationName(msg.Subject),
-				semconv.MessagingOperationProcess,
-				semconv.MessagingMessageID(envelope.ID),
-			),
-		)
-		defer span.End()
 
 		// Capture NATS reply subject
 		if msg.Reply != "" {
@@ -381,18 +352,6 @@ func (s *NATSSubscriber) processJetStreamMessage(msg *nats.Msg, handler HandlerF
 
 	// Extract trace context
 	ctx := otel.GetTextMapPropagator().Extract(context.Background(), metadataCarrier(envelope.Metadata))
-
-	// Start Span
-	ctx, span := tracer.Start(ctx, spanNameProcess+" "+msg.Subject,
-		trace.WithSpanKind(trace.SpanKindConsumer),
-		trace.WithAttributes(
-			semconv.MessagingSystem(systemName),
-			semconv.MessagingDestinationName(msg.Subject),
-			semconv.MessagingOperationProcess,
-			semconv.MessagingMessageID(envelope.ID),
-		),
-	)
-	defer span.End()
 
 	// Capture NATS reply subject
 	if msg.Reply != "" {

@@ -35,8 +35,9 @@ func (m *mockPublisher) PublishAsyncJS(ctx context.Context, subject string, msgT
 	return nil, nil
 }
 
-func (m *mockPublisher) Use(mw ...messaging.PublisherMiddleware) {}
-func (m *mockPublisher) SetValidator(v messaging.Validator)      {}
+func (m *mockPublisher) Use(mw ...messaging.PublisherMiddleware)      {}
+func (m *mockPublisher) UseRequest(mw ...messaging.RequestMiddleware) {}
+func (m *mockPublisher) SetValidator(v messaging.Validator)           {}
 
 func TestNATDemo_New(t *testing.T) {
 	logger, _ := zap.NewDevelopment()

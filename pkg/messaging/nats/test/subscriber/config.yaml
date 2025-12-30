@@ -19,10 +19,10 @@ metrics:
 
 # Global Tracing Configuration (OpenTelemetry)
 tracing:
-  enabled: true
-  service_name: "grouter-core"
+  enabled: false
+  service_name: "nats-subscriber"
   exporter: "stdout" # stdout, jaeger, zipkin, otlp
-  endpoint: "" # e.g., "http://localhost:14268/api/traces" for Jaeger
+  endpoint: "http://localhost:4318" # Jaeger OTLP HTTP port
 
 # Web Server Configuration
 web:
@@ -92,7 +92,7 @@ web:
 # NATS Messaging Configuration
 nats:
   enabled: true
-  url: "tls://localhost:4222"
+  url: "nats://localhost:4222"
   max_reconnects: 5
   reconnect_wait: "2s"
   connection_timeout: "2s"
@@ -109,7 +109,7 @@ nats:
   #creds_file: "./user.creds"
 
   # TLS/SSL
-  use_tls: true
+  use_tls: false
   skip_verify: false
   ca_file: "./ca.pem"
   cert_file: "./client-cert.pem"
@@ -118,6 +118,10 @@ nats:
   metrics:
     enabled: true
     path: "/metrics"
+  logging:
+    enabled: false
+  tracing:
+    enabled: false
 
 # Database Configuration (GORM)
 database:

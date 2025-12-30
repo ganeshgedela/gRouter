@@ -77,7 +77,7 @@ func TestTracingMiddleware(t *testing.T) {
 
 	spans := exporter.GetSpans()
 	assert.Len(t, spans, 1)
-	assert.Equal(t, "messaging.receive test.subject", spans[0].Name)
+	assert.Equal(t, "nats.process test.subject", spans[0].Name)
 }
 
 func TestPublisherTracingMiddleware(t *testing.T) {

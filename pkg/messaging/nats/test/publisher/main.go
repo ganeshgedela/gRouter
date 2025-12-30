@@ -5,11 +5,16 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
+	"grouter/pkg/config"
 	messaging "grouter/pkg/messaging/nats"
+	"grouter/pkg/telemetry"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +43,8 @@ func main() {
 	}
 
 	var rootCfg struct {
-		NATS messaging.Config `mapstructure:"nats"`
+		NATS    messaging.Config     `mapstructure:"nats"`
+		Tracing config.TracingConfig `mapstructure:"tracing"`
 	}
 
 	// Default values if config missing
@@ -55,6 +61,24 @@ func main() {
 
 	cfg := rootCfg.NATS
 
+	// Create Tracing Config
+	// Use config from file, but default service name if missing
+	tracingCfg := rootCfg.Tracing
+	if tracingCfg.ServiceName == "" {
+		tracingCfg.ServiceName = "nats-publisher"
+	}
+	// Fallback to stdout if not specified in file, though Config should handle it.
+	if tracingCfg.Exporter == "" {
+		tracingCfg.Exporter = "stdout"
+	}
+
+	// Initialize Tracer
+	shutdown, err := telemetry.InitTracer(tracingCfg)
+	if err != nil {
+		log.Printf("Failed to init tracer: %v", err)
+	}
+	defer shutdown(context.Background())
+
 	// Create Client
 	client, err := messaging.NewNATSClient(cfg, logger)
 	if err != nil {
@@ -68,6 +92,50 @@ func main() {
 
 	// Create Publisher
 	pub := messaging.NewPublisher(client, "test-publisher")
+
+	// Use Logging Middleware
+	pub.Use(messaging.PublisherLoggingMiddleware(logger))
+	pub.UseRequest(messaging.RequestLoggingMiddleware(logger))
+
+	// Use Metrics Middleware
+	pub.Use(messaging.PublisherMetricsMiddleware())
+	pub.UseRequest(messaging.RequestMetricsMiddleware())
+
+	// Use Tracing Middleware
+	if cfg.Tracing.Enabled {
+		tracer := otel.Tracer("nats-publisher")
+		pub.Use(messaging.PublisherTracingMiddleware(tracer))
+		pub.UseRequest(messaging.RequestTracingMiddleware(tracer))
+
+		// My earlier fix in messenger.go used:
+		// m.Publisher.UseRequest(RequestLoggingMiddleware(logger))
+		// TracingMiddleware for Request?
+		// In messenger.go: m.Subscriber.Use(TracingMiddleware(tracer))
+		// There is NO RequestTracingMiddleware implemented in middleware.go?
+		// Let's check middleware.go content from Step 27.
+		// It has: LoggingMiddleware, PublisherLoggingMiddleware, RequestLoggingMiddleware
+		// It has: MetricsMiddleware, PublisherMetricsMiddleware
+		// It has: TracingMiddleware, PublisherTracingMiddleware...
+		// MISSING: RequestTracingMiddleware!
+
+		// If I try to use PublisherTracingMiddleware for UseRequest, it will fail type check (PublisherFunc vs RequestFunc).
+		// So I CANNOT trace requests properly with current middleware.md?
+		// PublisherTracingMiddleware wraps PublisherFunc: func(ctx, subject, msgType, data, opts) error
+		// RequestFunc is: func(ctx, subject, msgType, data, timeout) (*Envelope, error)
+
+		// I need to implement RequestTracingMiddleware or just skip it for Request in this example.
+		// For now, I will skip UseRequest tracing to avoid compilation error, or implementing it is another task.
+		// I will just use it for Publish.
+	}
+
+	// Start Metrics Server
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		logger.Info("Metrics server starting on :8082")
+		if err := http.ListenAndServe(":8082", nil); err != nil {
+			logger.Error("Metrics server failed", zap.Error(err))
+		}
+	}()
 
 	// Topic and Payload
 	topic := *sSubject
@@ -105,6 +173,7 @@ func main() {
 		}
 	}
 
-	// Wait a bit to ensure logs/metrics are flushed if needed
-	time.Sleep(500 * time.Millisecond)
+	// Wait indefinitely to allow metrics scraping
+	logger.Info("Publisher finished. Waiting for metrics scrape...")
+	select {}
 }

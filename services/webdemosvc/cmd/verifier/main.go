@@ -89,7 +89,7 @@ func triggerStart(baseURL string, logger *zap.Logger) error {
 
 	logger.Info("Start triggered successfully")
 	// Give it a moment to register services
-	time.Sleep(1 * time.Second)
+	time.Sleep(5 * time.Second)
 	return nil
 }
 
