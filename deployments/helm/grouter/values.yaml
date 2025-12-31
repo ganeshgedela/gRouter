@@ -1,0 +1,118 @@
+# Default values for grouter.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Infrastructure Configurations
+nats:
+  enabled: true
+  image: 
+    repository: nats
+    tag: latest
+  replicas: 1
+  service:
+    port: 4222
+    monitorPort: 8222
+
+keycloak:
+  enabled: true
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: 23.0.0
+  replicas: 1
+  adminUser: admin
+  adminPassword: admin
+  service:
+    port: 8080
+    type: LoadBalancer
+
+jaeger:
+  enabled: true
+  image:
+    repository: jaegertracing/all-in-one
+    tag: latest
+  replicas: 1
+  service:
+    uiPort: 16686
+    otlpGrpcPort: 4317
+    otlpHttpPort: 4318
+    zipkinPort: 9411
+    type: LoadBalancer
+
+prometheus:
+  enabled: true
+  image:
+    repository: prom/prometheus
+    tag: latest
+  replicas: 1
+  service:
+    port: 9090
+    type: LoadBalancer
+
+grafana:
+  enabled: true
+  image:
+    repository: grafana/grafana
+    tag: latest
+  replicas: 1
+  adminUser: admin
+  adminPassword: admin
+  service:
+    port: 3000
+    type: LoadBalancer
+
+opensearch:
+  enabled: true
+  image:
+    repository: opensearchproject/opensearch
+    tag: latest
+  replicas: 1
+  service:
+    httpPort: 9200
+    transportPort: 9600
+  dashboards:
+    enabled: true
+    image:
+      repository: opensearchproject/opensearch-dashboards
+      tag: latest
+    service:
+      port: 5601
+      type: LoadBalancer
+
+fluentd:
+  enabled: true
+  image:
+    repository: fluent/fluentd-kubernetes-daemonset
+    tag: v1-debian-opensearch
+  service:
+    forwardPort: 24224
+    httpPort: 9880
+
+# Service Configurations
+webdemosvc:
+  enabled: true
+  image:
+    repository: local/webdemosvc
+    tag: latest
+    pullPolicy: Never
+  replicas: 1
+  logLevel: info
+  service:
+    port: 8081
+    type: LoadBalancer
+  auth:
+    enabled: true
+    issuer: "http://keycloak:8080/realms/grouter"
+    audience: "account"
+
+natsdemosvc:
+  enabled: true
+  image:
+    repository: local/natsdemosvc
+    tag: latest
+    pullPolicy: Never
+  replicas: 1
+  logLevel: info
+  service:
+    port: 8082
+    type: LoadBalancer

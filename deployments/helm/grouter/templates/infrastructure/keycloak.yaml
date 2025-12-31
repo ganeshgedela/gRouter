@@ -1,0 +1,50 @@
+{{- if .Values.keycloak.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "grouter.fullname" . }}-keycloak
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-keycloak
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.keycloak.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "grouter.name" . }}-keycloak
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "grouter.name" . }}-keycloak
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: keycloak
+    spec:
+      containers:
+      - name: keycloak
+        image: "{{ .Values.keycloak.image.repository }}:{{ .Values.keycloak.image.tag }}"
+        args: ["start-dev"]
+        env:
+        - name: KEYCLOAK_ADMIN
+          value: {{ .Values.keycloak.adminUser | quote }}
+        - name: KEYCLOAK_ADMIN_PASSWORD
+          value: {{ .Values.keycloak.adminPassword | quote }}
+        ports:
+        - containerPort: 8080
+          name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak # Fixed name
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-keycloak
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.keycloak.service.type }}
+  ports:
+  - port: {{ .Values.keycloak.service.port }}
+    targetPort: 8080
+  selector:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-keycloak
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}

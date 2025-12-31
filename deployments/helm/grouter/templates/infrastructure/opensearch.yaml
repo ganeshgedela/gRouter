@@ -1,0 +1,116 @@
+{{- if .Values.opensearch.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "grouter.fullname" . }}-opensearch
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  serviceName: "opensearch"
+  replicas: {{ .Values.opensearch.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: opensearch
+    spec:
+      containers:
+      - name: opensearch
+        image: "{{ .Values.opensearch.image.repository }}:{{ .Values.opensearch.image.tag }}"
+        env:
+        - name: discovery.type
+          value: "single-node"
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-Xms512m -Xmx512m"
+        - name: DISABLE_SECURITY_PLUGIN
+          value: "true"
+        ports:
+        - containerPort: 9200
+          name: http
+        - containerPort: 9600
+          name: transport
+        volumeMounts:
+        - name: data
+          mountPath: /usr/share/opensearch/data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch # Fixed name
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  ports:
+  - port: {{ .Values.opensearch.service.httpPort }}
+    name: http
+  - port: {{ .Values.opensearch.service.transportPort }}
+    name: transport
+  selector:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch
+    app.kubernetes.io/instance: {{ .Release.Name }}
+
+{{- if .Values.opensearch.dashboards.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "grouter.fullname" . }}-opensearch-dashboards
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch-dashboards
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch-dashboards
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch-dashboards
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: opensearch-dashboards
+    spec:
+      containers:
+      - name: opensearch-dashboards
+        image: "{{ .Values.opensearch.dashboards.image.repository }}:{{ .Values.opensearch.dashboards.image.tag }}"
+        env:
+        - name: OPENSEARCH_HOSTS
+          value: '["http://opensearch:9200"]'
+        - name: DISABLE_SECURITY_DASHBOARDS_PLUGIN
+          value: "true"
+        ports:
+        - containerPort: 5601
+          name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch-dashboards # Fixed name
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch-dashboards
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.opensearch.dashboards.service.type }}
+  ports:
+  - port: {{ .Values.opensearch.dashboards.service.port }}
+  selector:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-opensearch-dashboards
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+{{- end -}}

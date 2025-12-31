@@ -1,0 +1,48 @@
+{{- if .Values.grafana.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "grouter.fullname" . }}-grafana
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-grafana
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.grafana.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "grouter.name" . }}-grafana
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "grouter.name" . }}-grafana
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: "{{ .Values.grafana.image.repository }}:{{ .Values.grafana.image.tag }}"
+        env:
+        - name: GF_SECURITY_ADMIN_USER
+          value: {{ .Values.grafana.adminUser | quote }}
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: {{ .Values.grafana.adminPassword | quote }}
+        ports:
+        - containerPort: 3000
+          name: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana # Fixed name
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-grafana
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.grafana.service.type }}
+  ports:
+  - port: {{ .Values.grafana.service.port }}
+  selector:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-grafana
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}

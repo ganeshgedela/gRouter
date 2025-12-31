@@ -1,0 +1,50 @@
+{{- if .Values.nats.enabled -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "grouter.fullname" . }}-nats
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-nats
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  serviceName: "nats"
+  replicas: {{ .Values.nats.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "grouter.name" . }}-nats
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "grouter.name" . }}-nats
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: nats # For service discovery compatibility
+    spec:
+      containers:
+      - name: nats
+        image: "{{ .Values.nats.image.repository }}:{{ .Values.nats.image.tag }}"
+        command: ["/nats-server", "-js", "-m", "8222"]
+        ports:
+        - containerPort: {{ .Values.nats.service.port }}
+          name: client
+        - containerPort: {{ .Values.nats.service.monitorPort }}
+          name: monitor
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats # Fixed name for internal discovery simplicity
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-nats
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  ports:
+  - port: {{ .Values.nats.service.port }}
+    name: client
+  - port: {{ .Values.nats.service.monitorPort }}
+    name: monitor
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-nats
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}

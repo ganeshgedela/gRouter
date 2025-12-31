@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: natsdemosvc-config
+  labels:
+    app: natsdemosvc
+data:
+  config.yaml: |
+    log:
+      level: info
+    web:
+      port: 8082
+    nats:
+      url: "nats://nats:4222"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: natsdemosvc
+  labels:
+    app: natsdemosvc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: natsdemosvc
+  template:
+    metadata:
+      labels:
+        app: natsdemosvc
+    spec:
+      containers:
+      - name: natsdemosvc
+        image: local/natsdemosvc:latest
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8082
+          name: http
+        env:
+        - name: GROUTER_CONFIG_PATH
+          value: "/app/config/config.yaml"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+      volumes:
+      - name: config
+        configMap:
+          name: natsdemosvc-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: natsdemosvc
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 8082
+    targetPort: 8082
+  selector:
+    app: natsdemosvc

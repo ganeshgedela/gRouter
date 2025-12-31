@@ -1,0 +1,87 @@
+{{- if .Values.webdemosvc.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "grouter.fullname" . }}-webdemosvc-config
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-webdemosvc
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  config.yaml: |
+    app:
+      name: webdemosvc
+    log:
+      level: {{ .Values.webdemosvc.logLevel }}
+    web:
+      enabled: true
+      port: {{ .Values.webdemosvc.service.port }}
+      auth:
+        enabled: {{ .Values.webdemosvc.auth.enabled }}
+        issuer: {{ .Values.webdemosvc.auth.issuer | quote }}
+        audience: {{ .Values.webdemosvc.auth.audience | quote }}
+    nats:
+      enabled: true
+      url: "nats://nats:4222"
+    tracing:
+      enabled: true
+      service_name: webdemosvc
+      exporter: "otlp"
+      endpoint: "http://jaeger:4318"
+    services:
+      {{- toYaml .Values.webdemosvc.services | nindent 6 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "grouter.fullname" . }}-webdemosvc
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-webdemosvc
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.webdemosvc.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "grouter.name" . }}-webdemosvc
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "grouter.name" . }}-webdemosvc
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app: webdemosvc
+    spec:
+      containers:
+      - name: webdemosvc
+        image: "{{ .Values.webdemosvc.image.repository }}:{{ .Values.webdemosvc.image.tag }}"
+        imagePullPolicy: {{ .Values.webdemosvc.image.pullPolicy }}
+        command: ["/app/webdemosvc", "--config", "/app/config/config.yaml"]
+        ports:
+        - containerPort: {{ .Values.webdemosvc.service.port }}
+          name: http
+        env:
+        - name: GROUTER_CONFIG_PATH
+          value: "/app/config/config.yaml"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "grouter.fullname" . }}-webdemosvc-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webdemosvc # Fixed name
+  labels:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-webdemosvc
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: {{ .Values.webdemosvc.service.type }}
+  ports:
+  - port: {{ .Values.webdemosvc.service.port }}
+    targetPort: {{ .Values.webdemosvc.service.port }}
+  selector:
+    app.kubernetes.io/name: {{ include "grouter.name" . }}-webdemosvc
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}

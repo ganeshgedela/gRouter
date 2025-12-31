@@ -33,6 +33,9 @@ func (a *App) Init() error {
 	if err := a.manager.Init(); err != nil {
 		return fmt.Errorf("failed to init manager: %w", err)
 	}
+	if err := a.manager.InitNATS(); err != nil {
+		return fmt.Errorf("failed to init nats: %w", err)
+	}
 	if err := a.manager.InitWebServer(); err != nil {
 		return fmt.Errorf("failed to init web server: %w", err)
 	}
