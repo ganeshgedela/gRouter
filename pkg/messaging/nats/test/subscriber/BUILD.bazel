@@ -6,8 +6,12 @@ go_library(
     importpath = "grouter/pkg/messaging/nats/test/subscriber",
     visibility = ["//visibility:private"],
     deps = [
+        "//pkg/config",
         "//pkg/messaging/nats",
+        "//pkg/telemetry",
+        "@com_github_prometheus_client_golang//prometheus/promhttp",
         "@com_github_spf13_viper//:viper",
+        "@io_opentelemetry_go_otel//:otel",
         "@org_uber_go_zap//:zap",
     ],
 )

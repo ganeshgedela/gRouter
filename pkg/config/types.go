@@ -67,6 +67,14 @@ type WebConfig struct {
 	Security        SecurityConfig  `mapstructure:"security"`
 	RateLimit       RateLimitConfig `mapstructure:"rate_limit"`
 	Swagger         SwaggerConfig   `mapstructure:"swagger"`
+	Logging         LoggingConfig   `mapstructure:"logging"`
+	Auth            AuthConfig      `mapstructure:"auth"`
+}
+
+type AuthConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Issuer   string `mapstructure:"issuer"`
+	Audience string `mapstructure:"audience"`
 }
 
 // TLSConfig holds configuration for TLS

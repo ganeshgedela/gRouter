@@ -39,6 +39,16 @@ type Config struct {
 
 	// Swagger configuration
 	Swagger SwaggerConfig `mapstructure:"swagger"`
+
+	// Logging configuration
+	Logging LoggingConfig `mapstructure:"logging"`
+	Auth    AuthConfig    `mapstructure:"auth"`
+}
+
+type AuthConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	Issuer   string `mapstructure:"issuer"`
+	Audience string `mapstructure:"audience"`
 }
 
 // MetricsConfig holds configuration for metrics
@@ -97,6 +107,11 @@ type SwaggerConfig struct {
 	Path    string `mapstructure:"path"`
 }
 
+// LoggingConfig holds configuration for request logging
+type LoggingConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+}
+
 // DefaultConfig returns the default configuration
 func DefaultConfig() Config {
 	return Config{
@@ -121,6 +136,9 @@ func DefaultConfig() Config {
 		Swagger: SwaggerConfig{
 			Enabled: true,
 			Path:    "/swagger",
+		},
+		Logging: LoggingConfig{
+			Enabled: true,
 		},
 	}
 }

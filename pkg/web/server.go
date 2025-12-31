@@ -47,10 +47,17 @@ func InitEngine(cfg Config, logger *zap.Logger) *gin.Engine {
 	engine := gin.New()
 	engine.Use(RequestIDMiddleware())
 	engine.Use(gin.Recovery())
-	engine.Use(LoggerMiddleware(logger))
+
+	if cfg.Logging.Enabled {
+		engine.Use(LoggerMiddleware(logger))
+	}
 
 	if cfg.Tracing.Enabled {
 		engine.Use(otelgin.Middleware(cfg.Tracing.ServiceName))
+	}
+
+	if cfg.Auth.Enabled {
+		engine.Use(AuthMiddleware(cfg.Auth))
 	}
 
 	if cfg.CORS.Enabled {
@@ -164,6 +171,11 @@ func NewWebServer(cfg Config, logger *zap.Logger, healthSvc *health.HealthServic
 // RegisterService registers a service's routes with the server
 func (s *Server) RegisterWebService(service WebService) {
 	service.RegisterRoutes(s.engine.Group("/"))
+}
+
+// Use adds middleware to the web server engine
+func (s *Server) Use(middleware ...gin.HandlerFunc) {
+	s.engine.Use(middleware...)
 }
 
 // Health returns the underlying health service

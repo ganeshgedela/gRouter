@@ -12,6 +12,19 @@ services:
     networks:
       - grouter-net
 
+  # Keycloak (Identity Provider)
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0.0
+    container_name: keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports:
+      - "8080:8080"
+    command: start-dev
+    networks:
+      - grouter-net
+
   # Jaeger All-in-One (UI, Collector, Query)
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -119,6 +132,9 @@ services:
       - GROUTER_NATS_ENABLED=true
       - GROUTER_WEB_PORT=8081
       - GROUTER_LOG_LEVEL=info
+      - GROUTER_WEB_AUTH_ENABLED=true
+      - GROUTER_WEB_AUTH_ISSUER=http://keycloak:8080/realms/grouter
+      - GROUTER_WEB_AUTH_AUDIENCE=account
     ports:
       - "8081:8081"
     depends_on:

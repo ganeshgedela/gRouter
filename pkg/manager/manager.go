@@ -200,6 +200,14 @@ func (m *ServiceManager) InitWebServer() error {
 			Enabled: m.cfg.Web.Swagger.Enabled,
 			Path:    m.cfg.Web.Swagger.Path,
 		},
+		Logging: web.LoggingConfig{
+			Enabled: m.cfg.Web.Logging.Enabled,
+		},
+		Auth: web.AuthConfig{
+			Enabled:  m.cfg.Web.Auth.Enabled,
+			Issuer:   m.cfg.Web.Auth.Issuer,
+			Audience: m.cfg.Web.Auth.Audience,
+		},
 	}
 	m.webServer = web.NewWebServer(webConfig, m.log, m.health)
 

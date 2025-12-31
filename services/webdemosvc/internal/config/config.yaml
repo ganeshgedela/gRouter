@@ -4,9 +4,10 @@ app:
   environment: "development"
 
 tracing:
-  enabled: false
+  enabled: true
   service_name: "grouter-web"
-  exporter: "stdout"
+  exporter: "otlp"
+  endpoint: "http://localhost:4318"
 
 nats:
   enabled: false
@@ -65,6 +66,12 @@ web:
     enabled: true
     requests_per_second: 100
     burst: 200
+  logging:
+    enabled: true
+  auth:
+    enabled: true
+    issuer: "http://localhost:8080/realms/grouter"
+    audience: "account"
   swagger:
     enabled: true
     path: "/swagger"
