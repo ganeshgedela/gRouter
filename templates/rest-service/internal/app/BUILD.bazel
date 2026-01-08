@@ -1,0 +1,16 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "app",
+    srcs = ["app.go"],
+    importpath = "grouter/templates/rest-service/internal/app",
+    visibility = ["//templates/rest-service:__subpackages__"],
+    deps = [
+        "//pkg/manager",
+        "//pkg/web",
+        "//templates/rest-service/internal/config",
+        "//templates/rest-service/internal/pkg/orders",
+        "//templates/rest-service/internal/pkg/users",
+        "@com_github_gin_gonic_gin//:gin",
+    ],
+)

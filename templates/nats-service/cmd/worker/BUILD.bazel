@@ -1,0 +1,21 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_binary(
+    name = "worker",
+    embed = [":worker_lib"],
+    visibility = ["//visibility:public"],
+)
+
+go_library(
+    name = "worker_lib",
+    srcs = ["main.go"],
+    importpath = "grouter/templates/nats-service/cmd/worker",
+    visibility = ["//visibility:private"],
+    deps = [
+        "//pkg/config",
+        "//pkg/logger",
+        "//pkg/manager",
+        "//templates/nats-service/internal/app",
+        "@org_uber_go_zap//:zap",
+    ],
+)

@@ -1,0 +1,27 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "webdemo",
+    srcs = [
+        "config.go",
+        "handler.go",
+    ],
+    importpath = "grouter/services/webdemosvc/internal/pkg/webdemo",
+    visibility = ["//services/webdemosvc:__subpackages__"],
+    deps = [
+        "//pkg/manager",
+        "@com_github_gin_gonic_gin//:gin",
+    ],
+)
+
+go_test(
+    name = "webdemo_test",
+    srcs = ["handler_test.go"],
+    embed = [":webdemo"],
+    deps = [
+        "//pkg/manager",
+        "@com_github_gin_gonic_gin//:gin",
+        "@com_github_stretchr_testify//assert",
+        "@org_uber_go_zap//:zap",
+    ],
+)

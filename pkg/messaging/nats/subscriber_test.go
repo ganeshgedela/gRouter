@@ -14,7 +14,7 @@ import (
 func TestNewSubscriber(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -25,7 +25,7 @@ func TestNewSubscriber(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	subscriber := NewSubscriber(client, "test-subscriber")
+	subscriber := NewSubscriber(client)
 	if subscriber == nil {
 		t.Error("NewSubscriber() returned nil")
 	}
@@ -34,7 +34,7 @@ func TestNewSubscriber(t *testing.T) {
 func TestSubscriber_Subscribe_NotConnected(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -45,14 +45,14 @@ func TestSubscriber_Subscribe_NotConnected(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	subscriber := NewSubscriber(client, "test-subscriber")
+	subscriber := NewSubscriber(client)
 
 	handler := func(ctx context.Context, subject string, msg *MessageEnvelope) error {
 		return nil
 	}
 
 	// Try to subscribe without connection
-	err = subscriber.Subscribe("test.subject", handler, nil)
+	_, err = subscriber.Subscribe(context.Background(), "test.subject", handler, nil)
 	if err == nil {
 		t.Error("Subscribe() should return error when not connected")
 	}
@@ -65,7 +65,7 @@ func TestSubscriber_Subscribe_Integration(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -83,8 +83,8 @@ func TestSubscriber_Subscribe_Integration(t *testing.T) {
 	}
 	defer client.Close()
 
-	subscriber := NewSubscriber(client, "test-subscriber")
-	publisher := NewPublisher(client, "test-service")
+	subscriber := NewSubscriber(client)
+	publisher := NewPublisher(client)
 
 	// Test message reception
 	var wg sync.WaitGroup
@@ -97,7 +97,7 @@ func TestSubscriber_Subscribe_Integration(t *testing.T) {
 		return nil
 	}
 
-	err = subscriber.Subscribe("test.subscribe", handler, nil)
+	_, err = subscriber.Subscribe(context.Background(), "test.subscribe", handler, nil)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -135,8 +135,8 @@ func TestSubscriber_Subscribe_Integration(t *testing.T) {
 		t.Errorf("Message type = %v, want %v", receivedMsg.Type, "test.event")
 	}
 
-	if receivedMsg.Source != "test-service" {
-		t.Errorf("Message source = %v, want %v", receivedMsg.Source, "test-service")
+	if receivedMsg.Source != client.source {
+		t.Errorf("Message source = %v, want %v", receivedMsg.Source, client.source)
 	}
 
 	// Verify data
@@ -158,7 +158,7 @@ func TestSubscriber_QueueGroup_Integration(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -177,9 +177,9 @@ func TestSubscriber_QueueGroup_Integration(t *testing.T) {
 	defer client.Close()
 
 	// Create two subscribers in the same queue group
-	subscriber1 := NewSubscriber(client, "subscriber-1")
-	subscriber2 := NewSubscriber(client, "subscriber-2")
-	publisher := NewPublisher(client, "test-service")
+	subscriber1 := NewSubscriber(client)
+	subscriber2 := NewSubscriber(client)
+	publisher := NewPublisher(client)
 
 	var mu sync.Mutex
 	count1 := 0
@@ -201,12 +201,12 @@ func TestSubscriber_QueueGroup_Integration(t *testing.T) {
 
 	opts := &SubscribeOptions{QueueGroup: "test-queue"}
 
-	err = subscriber1.Subscribe("test.queue", handler1, opts)
+	_, err = subscriber1.Subscribe(context.Background(), "test.queue", handler1, opts)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
 
-	err = subscriber2.Subscribe("test.queue", handler2, opts)
+	_, err = subscriber2.Subscribe(context.Background(), "test.queue", handler2, opts)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSubscriber_Unsubscribe(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -268,8 +268,8 @@ func TestSubscriber_Unsubscribe(t *testing.T) {
 	}
 	defer client.Close()
 
-	subscriber := NewSubscriber(client, "test-subscriber")
-	publisher := NewPublisher(client, "test-service")
+	subscriber := NewSubscriber(client)
+	publisher := NewPublisher(client)
 
 	var mu sync.Mutex
 	count := 0
@@ -281,7 +281,7 @@ func TestSubscriber_Unsubscribe(t *testing.T) {
 		return nil
 	}
 
-	err = subscriber.Subscribe("test.unsub", handler, nil)
+	_, err = subscriber.Subscribe(context.Background(), "test.unsub", handler, nil)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -298,7 +298,7 @@ func TestSubscriber_Unsubscribe(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Unsubscribe
-	err = subscriber.Unsubscribe()
+	err = subscriber.Unsubscribe(context.Background())
 	if err != nil {
 		t.Errorf("Unsubscribe() error = %v", err)
 	}
@@ -328,7 +328,7 @@ func TestSubscriber_HandlerError(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -346,8 +346,8 @@ func TestSubscriber_HandlerError(t *testing.T) {
 	}
 	defer client.Close()
 
-	subscriber := NewSubscriber(client, "test-subscriber")
-	publisher := NewPublisher(client, "test-service")
+	subscriber := NewSubscriber(client)
+	publisher := NewPublisher(client)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -358,7 +358,7 @@ func TestSubscriber_HandlerError(t *testing.T) {
 		return ErrHandlerFailed
 	}
 
-	err = subscriber.Subscribe("test.error", handler, nil)
+	_, err = subscriber.Subscribe(context.Background(), "test.error", handler, nil)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -396,7 +396,7 @@ func TestSubscriber_Reply(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -414,8 +414,8 @@ func TestSubscriber_Reply(t *testing.T) {
 	}
 	defer client.Close()
 
-	subscriber := NewSubscriber(client, "test-responder")
-	publisher := NewPublisher(client, "test-requester")
+	subscriber := NewSubscriber(client)
+	publisher := NewPublisher(client)
 
 	// Setup responder
 	responderHandler := func(ctx context.Context, subject string, msg *MessageEnvelope) error {
@@ -433,7 +433,7 @@ func TestSubscriber_Reply(t *testing.T) {
 		return client.Conn().Publish(msg.Reply, respBytes)
 	}
 
-	err = subscriber.Subscribe("test.request", responderHandler, nil)
+	_, err = subscriber.Subscribe(context.Background(), "test.request", responderHandler, nil)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
@@ -446,7 +446,7 @@ func TestSubscriber_Reply(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	response, err := publisher.Request(ctx, "test.request", "test.query", requestData, 2*time.Second)
+	response, err := publisher.Request(ctx, "test.request", "test.query", requestData, 2*time.Second, nil)
 	if err != nil {
 		t.Fatalf("Request() error = %v", err)
 	}
@@ -462,12 +462,6 @@ func TestSubscriber_Reply(t *testing.T) {
 
 	// Verify data
 	var responseData map[string]string
-	// The data is double-marshaled because we passed msg.Data (which is json.RawMessage/[]byte) directly to Reply
-	// Reply marshals it again.
-	// Wait, msg.Data is json.RawMessage which is []byte.
-	// json.Marshal([]byte) encodes it as base64 string if it's treated as []byte, or just as is if it's RawMessage?
-	// json.RawMessage marshals to itself.
-	// So it should be fine.
 	err = json.Unmarshal(response.Data, &responseData)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal response data: %v", err)
@@ -485,7 +479,7 @@ func TestSubscriber_GracefulShutdown(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -503,8 +497,8 @@ func TestSubscriber_GracefulShutdown(t *testing.T) {
 	}
 	defer client.Close()
 
-	subscriber := NewSubscriber(client, "test-graceful")
-	publisher := NewPublisher(client, "test-service")
+	subscriber := NewSubscriber(client)
+	publisher := NewPublisher(client)
 
 	// Handler that sleeps
 	handlerFinished := make(chan struct{})
@@ -514,7 +508,7 @@ func TestSubscriber_GracefulShutdown(t *testing.T) {
 		return nil
 	}
 
-	err = subscriber.Subscribe("test.graceful", handler, nil)
+	_, err = subscriber.Subscribe(context.Background(), "test.graceful", handler, nil)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}

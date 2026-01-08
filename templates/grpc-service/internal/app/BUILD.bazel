@@ -1,0 +1,16 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "app",
+    srcs = ["app.go"],
+    importpath = "grouter/templates/grpc-service/internal/app",
+    visibility = ["//templates/grpc-service:__subpackages__"],
+    deps = [
+        "//pkg/manager",
+        "//pkg/messaging/grpc",
+        "//templates/grpc-service/api/proto",
+        "//templates/grpc-service/internal/config",
+        "//templates/grpc-service/internal/grpc",
+        "@org_golang_google_grpc//:grpc",
+    ],
+)

@@ -1,0 +1,42 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "grpc",
+    srcs = [
+        "client.go",
+        "middleware.go",
+        "server.go",
+        "tls.go",
+        "tls_helpers.go",
+        "types.go",
+    ],
+    importpath = "grouter/pkg/messaging/grpc",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_grpc_ecosystem_grpc_gateway_v2//runtime",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//credentials",
+        "@org_golang_google_grpc//credentials/insecure",
+        "@org_golang_google_grpc//keepalive",
+        "@org_golang_google_grpc//reflection",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "grpc_test",
+    srcs = [
+        "client_test.go",
+        "middleware_test.go",
+        "server_options_test.go",
+        "server_test.go",
+        "tls_test.go",
+    ],
+    embed = [":grpc"],
+    deps = [
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+        "@org_golang_google_grpc//:grpc",
+        "@org_uber_go_zap//:zap",
+    ],
+)

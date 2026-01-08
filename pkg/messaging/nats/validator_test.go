@@ -50,7 +50,8 @@ func TestPublisher_Validation(t *testing.T) {
 	client, _ := NewNATSClient(Config{URL: "nats://localhost:4222"}, logger)
 	// Note: We don't need to connect for this unit test as we check validation before connection check in Publish
 
-	pub := NewPublisher(client, "test-source")
+	pub := NewPublisher(client)
+	pub.Use(ValidatorMiddleware(pub.(*NATSPublisher)))
 	v := NewMapValidator()
 	v.Register("test.type", func(data []byte) error {
 		return fmt.Errorf("validation failed")

@@ -479,7 +479,32 @@ sequenceDiagram
 		log.Printf("Async Publish Failed: %v", err)
 	}
 ```
+#### 4.3 JetStream Deduplication (Msg-ID)
 
+**Function**: JetStream can automatically discard duplicate messages if a `Msg-ID` header is provided. This is crucial for achieving exactly-once semantics in case of publisher retries.
+
+**Go Code Example**:
+```go
+	// Deduplication using MsgID
+	opts := &messaging.PublishOptions{
+		MsgID: "order-12345", // Unique ID for this specific order
+	}
+	ack, err := pub.PublishJS(ctx, "orders.critical", "OrderCreated", data, opts)
+```
+
+#### 4.4 Client-Side Retries with Backoff
+
+**Function**: `PublishJS` supports automatic client-side retries to handle transient network issues or temporary JetStream unavailability.
+
+**Go Code Example**:
+```go
+	// Publish with 3 retries and 100ms backoff
+	opts := &messaging.PublishOptions{
+		Retries:   3,
+		RetryWait: 100 * time.Millisecond,
+	}
+	ack, err := pub.PublishJS(ctx, "orders.critical", "OrderCreated", data, opts)
+```
 
 ### 5. JetStream Subscription Patterns
 
@@ -641,6 +666,24 @@ func main() {
 		return nil
 	}, nil)
 }
+```
+
+
+#### 7.1 JetStream Middleware
+
+The library supports dedicated middleware for JetStream publishing, allowing you to intercept and decorate `PublishJS` and `PublishAsyncJS` calls.
+
+**Go Code Example**:
+```go
+	// Synchronous JS Middleware
+	jsMW := func(next messaging.JSPublisherFunc) messaging.JSPublisherFunc {
+		return func(ctx context.Context, subject, msgType string, data interface{}, opts *messaging.PublishOptions) (*nats.PubAck, error) {
+			log.Printf("JS Publish to %s", subject)
+			return next(ctx, subject, msgType, data, opts)
+		}
+	}
+
+	pub.UseJS(jsMW)
 ```
 
 ## 8. Authentication & Security Flows
@@ -1197,6 +1240,7 @@ For visual inspection of traces.
                 jaegertracing/all-in-one:1.60
     ```
 
+
 2.  **Configure Service**:
     Update `config.yaml` to point to Jaeger (ensure your code supports Jaeger/OTLP exporter, commonly via HTTP/GRPC).
     ```yaml
@@ -1214,3 +1258,318 @@ For visual inspection of traces.
     *   Select Service: `natsdemosvc`.
     *   Click **Find Traces**.
     *   You should see a trace showing the flow from Publisher -> Subscriber.
+
+## 11. Infrastructure Health (Ping)
+
+The library provides a `Ping()` method for active health monitoring of the NATS connection. Unlike basic status checks, this can be used to verify that the connection is actually responsive.
+
+**Go Code Example**:
+```go
+	// Check connection health
+	if err := client.Ping(); err != nil {
+		log.Printf("NATS connection is unhealthy: %v", err)
+		// Trigger failover or alert
+	}
+```
+
+## 9. Middleware Architecture
+
+The gRouter NATS client utilizes a robust **Chain of Responsibility** middleware architecture. This allows distinct concerns (like observability, resilience, and validation) to be layered around the core publishing logic without coupling.
+
+### 9.1 Middleware Execution Order (The Onion Model)
+
+Middleware is registered in a specific order. When a message is published, it traverses down through the **Outer** middleware to the **Inner** middleware, reaches the NATS client, and then returns back up the chain.
+
+**The Pipeline:**
+
+1.  **Recovery** (Panic Protection) - *Outermost*
+2.  **Metrics** (Observability)
+3.  **Logging** (Observability)
+4.  **Tracing** (OpenTelemetry)
+5.  **Timeout** (Global Deadline)
+6.  **Rate Limit** (Traffic Shaping)
+7.  **Validator** (Data Integrity)
+8.  **Circuit Breaker** (Fail Fast)
+9.  **Retry** (Transient Recovery) - *Innermost*
+10. **Publisher Logic** (Actual NATS Send)
+
+#### Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "NATS Middleware Stack"
+        A[Client Request] --> B[Middleware Chain]
+        
+        subgraph B
+            Recovery[Recovery Middleware] --> Metrics[Metrics Middleware]
+            Metrics --> Logging[Logging Middleware]
+            Logging --> Tracing[Tracing Middleware]
+            Tracing --> Timeout[Timeout Middleware]
+            Timeout --> RateLimit[Rate Limiter Middleware]
+            RateLimit --> Validator[Validation Middleware]
+            Validator --> CB[Circuit Breaker Middleware]
+            CB --> Retry[Retry Middleware]
+            Retry --> K[Main Handler]
+        end
+        
+        K --> L[Business Logic]
+        L --> M[Response]
+        
+        Metrics --> O[Prometheus Metrics]
+        Logging --> N[Structured Logging]
+        Tracing --> P[Jaeger/OpenTelemetry]
+        CB --> Q[Circuit State]
+        Retry --> R[Retry Logic]
+        RateLimit --> S[Rate Limit Counters]
+    end
+    
+    O --> T[Grafana Dashboard]
+    P --> U[Tracing UI]
+```
+
+### 9.2 Middleware Details & Sequence Diagrams
+
+#### 1. Recovery Middleware
+**Purpose**: Prevents the application from crashing if a panic occurs within the middleware chain or the handler.
+**Behavior**: Recovers from panics, logs the stack trace, and returns an error.
+
+```mermaid
+sequenceDiagram
+    participant App
+    participant Recovery Middleware
+    participant Next Layer
+
+    App->>Recovery Middleware: Call Not-Safe Code
+    Recovery Middleware->>Next Layer: Call()
+    
+    alt Panic Occurs
+        Note right of Next Layer: PANIC!
+        Next Layer--xRecovery Middleware: Panic Propagates
+        Note over Recovery Middleware: recover() catches panic
+        Recovery Middleware->>Recovery Middleware: Log Stack Trace
+        Recovery Middleware-->>App: Return Error("panic recovered")
+    else Success
+        Next Layer-->>Recovery Middleware: Return nil
+        Recovery Middleware-->>App: Return nil
+    end
+```
+
+#### 2. Metrics Middleware
+**Purpose**: Captures Prometheus metrics for operation counts, errors, and latency.
+**Behavior**: Records start time, calls next layer, records duration and result upon return.
+
+```mermaid
+sequenceDiagram
+    participant Prev
+    participant Metrics Middleware
+    participant Next
+
+    Prev->>Metrics Middleware: Publish()
+    Note over Metrics Middleware: Start Timer
+    Metrics Middleware->>Next: Publish()
+    Next-->>Metrics Middleware: Return (err)
+    Note over Metrics Middleware: Stop Timer<br/>Record Duration<br/>Inc Counter(status=err)
+    Metrics Middleware-->>Prev: Return (err)
+```
+
+#### 3. Logging Middleware
+**Purpose**: Provides structured logging of operations.
+**Behavior**: Logs the start of an operation (Debug) and the result (Info/Error).
+
+```mermaid
+sequenceDiagram
+    participant Prev
+    participant Logging Middleware
+    participant Next
+
+    Prev->>Logging Middleware: Publish(Subject, ID)
+    Logging Middleware->>Next: Publish()
+    
+    alt Success
+        Next-->>Logging Middleware: nil
+        Logging Middleware->>Logging Middleware: Log.Info("Published", ID)
+    else Error
+        Next-->>Logging Middleware: error
+        Logging Middleware->>Logging Middleware: Log.Error("Failed", ID, error)
+    end
+    Logging Middleware-->>Prev: Return result
+```
+
+#### 4. Tracing Middleware (OpenTelemetry)
+**Purpose**: Distributed tracing.
+**Behavior**: Starts a new Span, injects Trace Context into message headers (propagation), and ends the Span.
+
+```mermaid
+sequenceDiagram
+    participant Prev
+    participant Tracing Middleware
+    participant Next
+    participant NATS Msg
+
+    Prev->>Tracing Middleware: Publish(Context)
+    Note over Tracing Middleware: Start Span<br/>Get TraceID
+    Tracing Middleware->>NATS Msg: Inject TraceContext (Headers)
+    Tracing Middleware->>Next: Publish(Context, Msg)
+    Next-->>Tracing Middleware: Return (err)
+    
+    alt Error
+        Note over Tracing Middleware: Set Span Status = Error
+    end
+    Note over Tracing Middleware: End Span
+    Tracing Middleware-->>Prev: Return (err)
+```
+
+#### 5. Timeout Middleware
+**Purpose**: Enforces a global deadline for the entire operation.
+**Behavior**: Wraps the context with a deadline. If the downstream operation takes too long, the context is canceled.
+
+```mermaid
+sequenceDiagram
+    participant Prev
+    participant Timeout Middleware
+    participant Next
+
+    Prev->>Timeout Middleware: Publish(Context)
+    Note over Timeout Middleware: ctx, cancel = WithTimeout(5s)
+    Timeout Middleware->>Next: Publish(ctx)
+    
+    par Next Layer Execution
+        Next->>Next: Processing...
+    and Timer
+        Note over Timeout Middleware: 5s Elapsed?
+    end
+    
+    alt Completed in Time
+        Next-->>Timeout Middleware: Return Result
+    else Timeout Exceeded
+        Note over Timeout Middleware: Cancel Context
+        Next-->>Timeout Middleware: Return Context.DeadlineExceeded
+    end
+    
+    Timeout Middleware-->>Prev: Return Result
+```
+
+#### 6. Rate Limit Middleware
+**Purpose**: Traffic shaping and backpressure.
+**Behavior**: Uses a Token Bucket. Waits for a token before proceeding. If waiting exceeds the Context deadline (set by Timeout Middleware), it fails.
+
+```mermaid
+sequenceDiagram
+    participant Timeout MW (Outer)
+    participant RateLimit Middleware
+    participant Next
+
+    Timeout MW (Outer)->>RateLimit Middleware: Publish(ctx)
+    
+    alt Tokens Available
+        RateLimit Middleware->>RateLimit Middleware: Take Token (Instant)
+        RateLimit Middleware->>Next: Publish(ctx)
+        Next-->>RateLimit Middleware: Return
+    else Bucket Empty
+        RateLimit Middleware->>RateLimit Middleware: Wait(ctx)
+        
+        alt Token Replenished
+            RateLimit Middleware->>Next: Publish(ctx)
+        else Context Deadline Exceeded (Timeout)
+            Note over RateLimit Middleware: Context Canceled while waiting
+            RateLimit Middleware-->>Timeout MW (Outer): Return Error("DeadlineExceeded")
+        end
+    end
+```
+
+#### 7. Validator Middleware
+**Purpose**: Ensures message data adheres to schema requirements before attempting to send.
+**Behavior**: Schema check. If invalid, returns error immediately (Short-circuit). Prevents partial failures or polluting the Circuit Breaker with "Bad Data" errors.
+
+```mermaid
+sequenceDiagram
+    participant Prev
+    participant Validator Middleware
+    participant Next (Circuit Breaker)
+
+    Prev->>Validator Middleware: Publish(Data)
+    
+    Note over Validator Middleware: Validate(Data)
+    
+    alt Invalid
+        Note over Validator Middleware: Schema Error
+        Validator Middleware-->>Prev: Return Error("Validation Failed")
+        Note right of Validator Middleware: Next Layer NOT called
+    else Valid
+        Validator Middleware->>Next (Circuit Breaker): Publish(Data)
+        Next (Circuit Breaker)-->>Validator Middleware: Return Result
+        Validator Middleware-->>Prev: Return Result
+    end
+```
+
+#### 8. Circuit Breaker Middleware
+**Purpose**: Protection against cascading failures. Fails fast if the downstream service (NATS Server) is unhealthy.
+**Behavior**: Monitors failures. If threshold reached, "Trips" (Open state) and rejects all requests immediately for a cooldown period.
+
+```mermaid
+sequenceDiagram
+    participant Prev
+    participant Circuit Breaker
+    participant Next (Retry/NATS)
+
+    Prev->>Circuit Breaker: Publish()
+    
+    alt State: Closed (Normal)
+        Circuit Breaker->>Next (Retry/NATS): Publish()
+        alt Success
+            Next (Retry/NATS)-->>Circuit Breaker: OK
+            Circuit Breaker->>Circuit Breaker: Record Success
+        else Failure
+            Next (Retry/NATS)-->>Circuit Breaker: Error
+            Circuit Breaker->>Circuit Breaker: Record Failure<br/>Hit Threshold? Trip!
+        end
+        Circuit Breaker-->>Prev: Return Result
+        
+    else State: Open (Tripped)
+        Note over Circuit Breaker: Fail Fast
+        Circuit Breaker-->>Prev: Return Error("Circuit Open")
+        Note right of Circuit Breaker: Next Layer NOT called
+        
+    else State: Half-Open (Probing)
+        Note over Circuit Breaker: Allow 1 Request
+        Circuit Breaker->>Next (Retry/NATS): Publish()
+        alt Success
+            Circuit Breaker->>Circuit Breaker: Reset to Closed
+        else Failure
+            Circuit Breaker->>Circuit Breaker: Trip back to Open
+        end
+    end
+```
+
+#### 9. Retry Middleware
+**Purpose**: Handles transient failures (network blips).
+**Behavior**: Retries the operation with exponential backoff if it fails.
+**Note**: This is the *Innermost* middleware. If it fails after N attempts, the error propagates up to the Circuit Breaker.
+
+```mermaid
+sequenceDiagram
+    participant Circuit Breaker (Outer)
+    participant Retry Middleware
+    participant NATS Client
+
+    Circuit Breaker (Outer)->>Retry Middleware: Publish()
+    
+    loop Max Retries (e.g. 3)
+        Retry Middleware->>NATS Client: Publish()
+        
+        alt Success
+            NATS Client-->>Retry Middleware: OK
+            Retry Middleware-->>Circuit Breaker (Outer): OK
+            Note right of Retry Middleware: Break Loop
+        else Transient Error
+            NATS Client-->>Retry Middleware: Error
+            Note over Retry Middleware: Sleep(Backoff)
+            Retry Middleware->>Retry Middleware: Retry...
+        end
+    end
+    
+    alt All Retries Failed
+        Retry Middleware-->>Circuit Breaker (Outer): Return Final Error
+    end
+```
+

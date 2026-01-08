@@ -18,7 +18,7 @@ func TestJetStream_Integration(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -54,8 +54,8 @@ func TestJetStream_Integration(t *testing.T) {
 	}
 	defer js.DeleteStream(streamName)
 
-	publisher := NewPublisher(client, "test-service")
-	subscriber := NewSubscriber(client, "test-subscriber")
+	publisher := NewPublisher(client)
+	subscriber := NewSubscriber(client)
 
 	// Test message reception
 	var wg sync.WaitGroup
@@ -69,14 +69,16 @@ func TestJetStream_Integration(t *testing.T) {
 	}
 
 	// Subscribe to JetStream
-	err = subscriber.SubscribePush(subject, handler, nats.Durable("test-consumer"))
+	_, err = subscriber.SubscribePush(context.Background(), subject, handler, &SubscribeOptions{
+		NatsOptions: []nats.SubOpt{nats.Durable("test-consumer")},
+	})
 	if err != nil {
 		t.Fatalf("SubscribePush() error = %v", err)
 	}
 
 	// Publish a message to JetStream
 	testData := map[string]string{"key": "js-value"}
-	ack, err := publisher.PublishJS(context.Background(), subject, "test.js.event", testData)
+	ack, err := publisher.PublishJS(context.Background(), subject, "test.js.event", testData, nil)
 	if err != nil {
 		t.Fatalf("PublishJS() error = %v", err)
 	}
@@ -115,7 +117,7 @@ func TestJetStream_Redelivery_Integration(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -151,8 +153,8 @@ func TestJetStream_Redelivery_Integration(t *testing.T) {
 	}
 	defer js.DeleteStream(streamName)
 
-	publisher := NewPublisher(client, "test-service")
-	subscriber := NewSubscriber(client, "test-subscriber")
+	publisher := NewPublisher(client)
+	subscriber := NewSubscriber(client)
 
 	var mu sync.Mutex
 	attempts := 0
@@ -177,17 +179,19 @@ func TestJetStream_Redelivery_Integration(t *testing.T) {
 	}
 
 	// Subscribe to JetStream with a short AckWait for faster redelivery
-	err = subscriber.SubscribePush(subject, handler,
-		nats.Durable("retry-consumer"),
-		nats.AckWait(1*time.Second),
-		nats.MaxDeliver(3),
-	)
+	_, err = subscriber.SubscribePush(context.Background(), subject, handler, &SubscribeOptions{
+		NatsOptions: []nats.SubOpt{
+			nats.Durable("retry-consumer"),
+			nats.AckWait(1 * time.Second),
+			nats.MaxDeliver(3),
+		},
+	})
 	if err != nil {
 		t.Fatalf("SubscribePush() error = %v", err)
 	}
 
 	// Publish a message
-	_, err = publisher.PublishJS(context.Background(), subject, "test.retry.event", map[string]string{"foo": "bar"})
+	_, err = publisher.PublishJS(context.Background(), subject, "test.retry.event", map[string]string{"foo": "bar"}, nil)
 	if err != nil {
 		t.Fatalf("PublishJS() error = %v", err)
 	}

@@ -79,3 +79,20 @@ func (s *ServiceStore) List() []string {
 	}
 	return out
 }
+
+// All returns a slice of all registered services.
+func (s *ServiceStore) All() []Service {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Service, 0, len(s.serviceMap))
+	for _, v := range s.serviceMap {
+		out = append(out, v)
+	}
+	return out
+}
+
+func (s *ServiceStore) DeleteAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.serviceMap = make(map[string]Service)
+}

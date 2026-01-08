@@ -1,10 +1,13 @@
 package nats
 
+import "sync"
+
 // ValidateFunc is a function that validates message data.
 type ValidateFunc func(data []byte) error
 
 // MapValidator implements the Validator interface using a map of validation functions.
 type MapValidator struct {
+	mu         sync.RWMutex
 	validators map[string]ValidateFunc
 }
 
@@ -17,12 +20,17 @@ func NewMapValidator() *MapValidator {
 
 // Register adds a validation function for a specific message type.
 func (v *MapValidator) Register(msgType string, fn ValidateFunc) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	v.validators[msgType] = fn
 }
 
 // Validate checks if the data matches the schema for the given message type.
 func (v *MapValidator) Validate(msgType string, data []byte) error {
+	v.mu.RLock()
 	fn, ok := v.validators[msgType]
+	v.mu.RUnlock()
+
 	if !ok {
 		// If no validator is registered for this type, we assume it's valid.
 		// Alternatively, we could return an error if strict validation is required.

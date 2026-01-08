@@ -14,6 +14,7 @@ type Client struct {
 	conn   *nats.Conn
 	js     nats.JetStreamContext
 	logger *zap.Logger
+	source string
 	config Config
 }
 
@@ -23,23 +24,78 @@ type Config struct {
 	MaxReconnects     int           `mapstructure:"max_reconnects"`
 	ReconnectWait     time.Duration `mapstructure:"reconnect_wait"`
 	ConnectionTimeout time.Duration `mapstructure:"connection_timeout"`
-	Token             string        `mapstructure:"token"`
-	Username          string        `mapstructure:"username"`
-	Password          string        `mapstructure:"password"`
+	DrainTimeout      time.Duration `mapstructure:"drain_timeout"`
+	// Authentication configuration
+	Auth AuthConfig `mapstructure:"auth"`
 	// TLS configuration
-	UseTLS     bool   `mapstructure:"use_tls"`
+	TLS TLSConfig `mapstructure:"tls"`
+	// Middleware configuration
+	Middleware NATSMiddlewareConfig `mapstructure:"middleware"`
+}
+
+// AuthConfig holds authentication configuration
+type AuthConfig struct {
+	Token     string `mapstructure:"token"`
+	Username  string `mapstructure:"username"`
+	Password  string `mapstructure:"password"`
+	CredsFile string `mapstructure:"creds_file"`
+}
+
+// TLSConfig holds TLS configuration
+type TLSConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
 	SkipVerify bool   `mapstructure:"skip_verify"`
 	CAFile     string `mapstructure:"ca_file"`
 	CertFile   string `mapstructure:"cert_file"`
 	KeyFile    string `mapstructure:"key_file"`
-	// NATS 2.0+ Credentials
-	CredsFile string `mapstructure:"creds_file"`
-	// Metrics configuration
-	Metrics MetricsConfig `mapstructure:"metrics"`
-	// Logging configuration
-	Logging LoggingConfig `mapstructure:"logging"`
-	// Tracing configuration
-	Tracing TracingConfig `mapstructure:"tracing"`
+}
+
+// NATSMiddlewareConfig holds configuration for NATS middleware
+type NATSMiddlewareConfig struct {
+	Recovery       MiddlewareState      `mapstructure:"recovery"`
+	Metrics        MetricsConfig        `mapstructure:"metrics"`
+	Tracing        MiddlewareState      `mapstructure:"tracing"`
+	Logging        LoggingConfig        `mapstructure:"logging"`
+	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	Retry          RetryConfig          `mapstructure:"retry"`
+	Timeout        TimeoutConfig        `mapstructure:"timeout"`
+	RateLimit      RateLimitConfig      `mapstructure:"rate_limit"`
+}
+
+// RateLimitConfig holds configuration for rate limiting
+type RateLimitConfig struct {
+	Enabled           bool    `mapstructure:"enabled"`
+	RequestsPerSecond float64 `mapstructure:"requests_per_second"`
+	Burst             int     `mapstructure:"burst"`
+}
+
+// TimeoutConfig holds configuration for timeout middleware
+type TimeoutConfig struct {
+	Enabled bool          `mapstructure:"enabled"`
+	Default time.Duration `mapstructure:"default"`
+}
+
+// RetryConfig holds configuration for retry middleware
+type RetryConfig struct {
+	Enabled         bool          `mapstructure:"enabled"`
+	MaxAttempts     int           `mapstructure:"max_attempts"`
+	InitialInterval time.Duration `mapstructure:"initial_interval"`
+	Multiplier      float64       `mapstructure:"multiplier"`
+	MaxInterval     time.Duration `mapstructure:"max_interval"`
+}
+
+// CircuitBreakerConfig holds configuration for circuit breaker
+type CircuitBreakerConfig struct {
+	Enabled       bool          `mapstructure:"enabled"`
+	MaxRequests   uint32        `mapstructure:"max_requests"`
+	Interval      time.Duration `mapstructure:"interval"`
+	Timeout       time.Duration `mapstructure:"timeout"`
+	TripThreshold uint32        `mapstructure:"trip_threshold"`
+}
+
+// MiddlewareState holds generic enabled state
+type MiddlewareState struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // MetricsConfig holds configuration for metrics
@@ -72,59 +128,7 @@ func NewNATSClient(cfg Config, logger *zap.Logger) (*Client, error) {
 
 // Connect establishes connection to NATS server
 func (c *Client) Connect() error {
-	opts := []nats.Option{
-		nats.MaxReconnects(c.config.MaxReconnects),
-		nats.ReconnectWait(c.config.ReconnectWait),
-		nats.Timeout(c.config.ConnectionTimeout),
-		nats.RetryOnFailedConnect(true),
-		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			if err != nil {
-				c.logger.Error("NATS disconnected", zap.Error(err))
-			}
-		}),
-		nats.ReconnectHandler(func(nc *nats.Conn) {
-			c.logger.Info("NATS reconnected", zap.String("url", nc.ConnectedUrl()))
-		}),
-		nats.ClosedHandler(func(nc *nats.Conn) {
-			c.logger.Warn("NATS connection closed")
-		}),
-	}
-
-	// Add authentication if provided
-	if c.config.CredsFile != "" {
-		opts = append(opts, nats.UserCredentials(c.config.CredsFile))
-	} else if c.config.Token != "" {
-		opts = append(opts, nats.Token(c.config.Token))
-	} else if c.config.Username != "" && c.config.Password != "" {
-		opts = append(opts, nats.UserInfo(c.config.Username, c.config.Password))
-	}
-
-	// Add TLS if enabled
-	if c.config.UseTLS {
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: c.config.SkipVerify,
-		}
-		if c.config.CAFile != "" {
-			opts = append(opts, nats.RootCAs(c.config.CAFile))
-		}
-		if c.config.CertFile != "" && c.config.KeyFile != "" {
-			opts = append(opts, nats.ClientCert(c.config.CertFile, c.config.KeyFile))
-		}
-
-		// If custom TLS config is needed beyond just files (e.g. SkipVerify is already handled)
-		// We can still use nats.Secure(tlsConfig) but RootCAs and ClientCert helper options
-		// read the files directly which is often safer/easier.
-		// However, nats.Secure overwrites the TLS config, so we should be careful mixing them.
-		// The helper options modify the internal TLS config.
-		// If SkipVerify is set, we still need to ensure that applies.
-		// Let's rely on the helper options for certs, and manual Secure() for SkipVerify if needed,
-		// but nats.Secure() takes a *tls.Config.
-
-		// Better approach:
-		// If we use nats.Secure(tlsConfig), we provide the base config.
-		// Then we can append RootCAs and ClientCert which will modify the connection's TLS state.
-		opts = append(opts, nats.Secure(tlsConfig))
-	}
+	opts := c.buildConnectionOptions()
 
 	conn, err := nats.Connect(c.config.URL, opts...)
 	if err != nil {
@@ -132,12 +136,64 @@ func (c *Client) Connect() error {
 	}
 
 	c.conn = conn
-	if c.conn.IsConnected() {
-		c.logger.Info("Connected to NATS", zap.String("url", c.config.URL))
-	} else {
-		c.logger.Warn("NATS connection established but not yet connected (reconnecting mode)", zap.String("url", c.config.URL))
+
+	// Create JetStream Context
+	js, err := conn.JetStream()
+	if err != nil {
+		conn.Close()
+		return fmt.Errorf("failed to create JetStream context: %w", err)
 	}
+	c.js = js
+
 	return nil
+}
+
+// buildConnectionOptions creates the NATS connection options based on config
+func (c *Client) buildConnectionOptions() []nats.Option {
+	logger := c.logger
+	opts := []nats.Option{
+		nats.MaxReconnects(c.config.MaxReconnects),
+		nats.ReconnectWait(c.config.ReconnectWait),
+		nats.Timeout(c.config.ConnectionTimeout),
+		nats.RetryOnFailedConnect(true),
+		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
+			if err != nil {
+				logger.Error("NATS disconnected", zap.Error(err))
+			}
+		}),
+		nats.ReconnectHandler(func(nc *nats.Conn) {
+			logger.Debug("NATS reconnected", zap.String("url", nc.ConnectedUrl()))
+		}),
+	}
+
+	// Add authentication if provided
+	if c.config.Auth.CredsFile != "" {
+		opts = append(opts, nats.UserCredentials(c.config.Auth.CredsFile))
+	} else if c.config.Auth.Token != "" {
+		opts = append(opts, nats.Token(c.config.Auth.Token))
+	} else if c.config.Auth.Username != "" && c.config.Auth.Password != "" {
+		opts = append(opts, nats.UserInfo(c.config.Auth.Username, c.config.Auth.Password))
+	}
+
+	// Add TLS if enabled
+	if c.config.TLS.Enabled {
+		tlsConfig := &tls.Config{
+			InsecureSkipVerify: c.config.TLS.SkipVerify,
+		}
+		if c.config.TLS.CAFile != "" {
+			opts = append(opts, nats.RootCAs(c.config.TLS.CAFile))
+		}
+		if c.config.TLS.CertFile != "" && c.config.TLS.KeyFile != "" {
+			opts = append(opts, nats.ClientCert(c.config.TLS.CertFile, c.config.TLS.KeyFile))
+		}
+
+		// Apply the base secure config (handles SkipVerify)
+		// If we use nats.Secure(tlsConfig), we provide the base config.
+		// Then we can append RootCAs and ClientCert which will modify the connection's TLS state.
+		opts = append(opts, nats.Secure(tlsConfig))
+	}
+
+	return opts
 }
 
 // Close gracefully closes the NATS connection
@@ -145,7 +201,7 @@ func (c *Client) Close() error {
 	if c.conn != nil {
 		c.conn.Drain()
 		c.conn.Close()
-		c.logger.Info("NATS connection closed")
+		c.logger.Debug("NATS connection closed")
 	}
 	return nil
 }
@@ -177,4 +233,12 @@ func (c *Client) JetStream() (nats.JetStreamContext, error) {
 
 	c.js = js
 	return js, nil
+}
+
+// Ping checks the connection health
+func (c *Client) Ping() error {
+	if !c.IsConnected() {
+		return fmt.Errorf("nats client not connected")
+	}
+	return nil
 }

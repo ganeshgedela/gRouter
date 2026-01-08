@@ -1,12 +1,27 @@
 package web
 
-import "github.com/gin-gonic/gin"
+import (
+	"grouter/pkg/manager"
 
-// Service defines a component that exposes HTTP endpoints.
-// Services implementing this interface can be registered with the Web Server.
-type WebService interface {
-	// RegisterRoutes registers the service's routes on the provided RouterGroup.
-	// The router group will be scoped to the service's base path if configured,
-	// or the root if not.
-	RegisterRoutes(router *gin.RouterGroup)
+	"github.com/gin-gonic/gin"
+)
+
+// Server interface for HTTP server
+type Server interface {
+	manager.Service // Implements manager.Service interface
+
+	// Additional web-specific methods
+	Engine() *gin.Engine
+	RegisterService(service WebService)
+	Use(middleware ...gin.HandlerFunc)
+	RegisterRoutes(path string, handler gin.HandlerFunc, methods ...string)
 }
+
+// WebService interface for HTTP services
+type WebService interface {
+	RegisterRoutes(router gin.IRouter)
+	ServiceName() string
+}
+
+// Middleware represents a Gin middleware function
+type Middleware func(gin.HandlerFunc) gin.HandlerFunc

@@ -111,7 +111,7 @@ sub.Subscribe("orders.created", func(ctx, subject, env) error {
 })
 ```
 
-### 4. JetStream (Reliable)
+### 4. JetStream
 ```go
 // Publish to Stream
 ack, err := pub.PublishJS(ctx, "orders.critical", "CriticalOrder", data)

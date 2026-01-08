@@ -3,14 +3,18 @@ package logger
 import (
 	"fmt"
 	"os"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
 	globalLogger *zap.Logger
 	sugar        *zap.SugaredLogger
+	mu           sync.RWMutex
 )
 
 // Config holds logger configuration
@@ -18,10 +22,38 @@ type Config struct {
 	Level      string
 	Format     string // json or console
 	OutputPath string
+
+	// Log rotation settings (only applies when OutputPath is a file)
+	MaxSize    int  // Maximum size in megabytes before rotation (default: 100)
+	MaxBackups int  // Maximum number of old log files to retain (default: 3)
+	MaxAge     int  // Maximum number of days to retain old log files (default: 28)
+	Compress   bool // Whether to compress rotated files (default: true)
+
+	// Sampling configuration for high-volume environments
+	EnableSampling     bool // Enable log sampling to prevent flooding
+	SamplingInitial    int  // Initial number of messages logged per second (default: 100)
+	SamplingThereafter int  // Messages logged after initial threshold (default: 100)
 }
 
-// New creates a new logger instance
+// New creates a new logger instance with production-ready features
 func New(cfg Config) (*zap.Logger, error) {
+	// Set defaults
+	if cfg.MaxSize == 0 {
+		cfg.MaxSize = 100
+	}
+	if cfg.MaxBackups == 0 {
+		cfg.MaxBackups = 3
+	}
+	if cfg.MaxAge == 0 {
+		cfg.MaxAge = 28
+	}
+	if cfg.SamplingInitial == 0 {
+		cfg.SamplingInitial = 100
+	}
+	if cfg.SamplingThereafter == 0 {
+		cfg.SamplingThereafter = 100
+	}
+
 	// Parse log level
 	level, err := zapcore.ParseLevel(cfg.Level)
 	if err != nil {
@@ -48,48 +80,82 @@ func New(cfg Config) (*zap.Logger, error) {
 		encoder = zapcore.NewConsoleEncoder(encoderConfig)
 	}
 
-	// Configure output
+	// Configure output with proper file handle management
 	var writer zapcore.WriteSyncer
 	if cfg.OutputPath == "" || cfg.OutputPath == "stdout" {
-		writer = zapcore.AddSync(os.Stdout)
+		// Use locked stdout to prevent concurrent write issues
+		writer = zapcore.Lock(os.Stdout)
 	} else {
-		file, err := os.OpenFile(cfg.OutputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open log file: %w", err)
-		}
-		writer = zapcore.AddSync(file)
+		// Use lumberjack for automatic log rotation
+		writer = zapcore.AddSync(&lumberjack.Logger{
+			Filename:   cfg.OutputPath,
+			MaxSize:    cfg.MaxSize,
+			MaxBackups: cfg.MaxBackups,
+			MaxAge:     cfg.MaxAge,
+			Compress:   cfg.Compress,
+		})
 	}
 
 	// Create core
 	core := zapcore.NewCore(encoder, writer, level)
 
-	// Create logger
-	//logger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
-	// Disable stacktrace
-	logger := zap.New(core, zap.AddCaller())
+	// Apply sampling if enabled
+	if cfg.EnableSampling {
+		core = zapcore.NewSamplerWithOptions(
+			core,
+			time.Second,
+			cfg.SamplingInitial,
+			cfg.SamplingThereafter,
+		)
+	}
 
+	// Create logger with caller info
+	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(0))
+
+	// Thread-safe update of global logger
+	mu.Lock()
 	globalLogger = logger
 	sugar = logger.Sugar()
+	mu.Unlock()
 
 	return logger, nil
 }
 
-// Get returns the global logger
+// Get returns the global logger (thread-safe)
 func Get() *zap.Logger {
-	if globalLogger == nil {
+	mu.RLock()
+	logger := globalLogger
+	mu.RUnlock()
+
+	if logger == nil {
 		// Create a default logger if none exists
-		logger, _ := zap.NewProduction()
-		globalLogger = logger
+		mu.Lock()
+		if globalLogger == nil {
+			logger, _ := zap.NewProduction()
+			globalLogger = logger
+			sugar = logger.Sugar()
+		}
+		mu.Unlock()
+		return globalLogger
 	}
-	return globalLogger
+	return logger
 }
 
-// Sugar returns the global sugared logger
+// Sugar returns the global sugared logger (thread-safe)
 func Sugar() *zap.SugaredLogger {
-	if sugar == nil {
-		sugar = Get().Sugar()
+	mu.RLock()
+	s := sugar
+	mu.RUnlock()
+
+	if s == nil {
+		mu.Lock()
+		if sugar == nil {
+			sugar = Get().Sugar()
+		}
+		s = sugar
+		mu.Unlock()
 	}
-	return sugar
+	return s
 }
 
 // WithFields creates a logger with additional fields

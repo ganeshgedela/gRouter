@@ -1,0 +1,90 @@
+# gRPC Service Configuration
+
+app:
+  name: "grpc-server"
+  version: "1.0.0"
+  environment: "development"
+
+# Logging Configuration
+logging:
+  level: "info"
+  encoding: "json"
+  output_paths:
+    - "stdout"
+  error_output_paths:
+    - "stderr"
+
+# gRPC Configuration
+grpc:
+  enabled: true
+  port: 9090
+  keepalive_time: "2h"
+  keepalive_timeout: "20s"
+  reflection_enabled: true
+  gateway_enabled: false
+  gateway_port: 8081
+
+  # TLS Configuration
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    client_auth: false
+    ca_file: ""
+
+  # Interceptors (Middleware)
+  interceptors:
+    logging:
+      enabled: true
+      level: "info"
+    
+    metrics:
+      enabled: true
+    
+    tracing:
+      enabled: true
+    
+    recovery:
+      enabled: true
+    
+    retry:
+      enabled: true
+      max_attempts: 3
+      initial_interval: "100ms"
+      max_interval: "2s"
+      multiplier: 2.0
+    
+    timeout:
+      enabled: true
+      default: "5s"
+    
+    rate_limit:
+      enabled: true
+      requests_per_second: 100
+      burst: 200
+    
+    circuit_breaker:
+      enabled: true
+      max_requests: 10
+      interval: "60s"
+      timeout: "10s"
+      trip_threshold: 5
+    
+    auth:
+      enabled: false
+
+# Telemetry Configuration
+telemetry:
+  metrics:
+    enabled: true
+    port: 9091
+    path: "/metrics"
+  
+  tracing:
+    enabled: true
+    provider: "otlp"
+    endpoint: "localhost:4317"
+    sample_rate: 0.1
+
+# Service-Specific Configuration
+max_concurrent_streams: 100

@@ -2,7 +2,7 @@
 # This file serves as a reference for all available configuration options.
 
 app:
-  name: "gRouter"
+  name: "natsdemosvc"
   version: "1.0.0"
   environment: "development" # development, production, test
 
@@ -12,17 +12,10 @@ log:
   format: "console" # console, json
   output_path: "stdout" # stdout, stderr, or file path
 
-# Global Metrics Configuration
-metrics:
-  enabled: true
-  path: "/metrics"
-
-# Global Tracing Configuration (OpenTelemetry)
-tracing:
-  enabled: true
-  service_name: "grouter-core"
-  exporter: "stdout" # stdout, jaeger, zipkin, otlp
-  endpoint: "" # e.g., "http://localhost:14268/api/traces" for Jaeger
+# Service Manager Configuration
+manager:
+  shutdown_timeout: "30s"
+  monitor_interval: "5s"
 
 # Web Server Configuration
 web:
@@ -32,6 +25,17 @@ web:
   read_timeout: "10s"
   write_timeout: "10s"
   shutdown_timeout: "5s"
+  max_request_body_size: 10485760 # 10MB
+
+  # Web Logging
+  logging:
+    enabled: true
+
+  # Web Authentication (JWT)
+  auth:
+    enabled: false
+    issuer: ""
+    audience: ""
 
   # Web-specific Metrics Override (optional, defaults to global provided by middleware)
   metrics:
@@ -89,6 +93,22 @@ web:
     enabled: true
     path: "/swagger"
 
+# gRPC Configuration
+grpc:
+  enabled: true
+  port: 9090
+  keepalive_time: "2h"
+  keepalive_timeout: "20s"
+  reflection_enabled: true
+  gateway_enabled: true
+  gateway_port: 8081
+  tls:
+    enabled: false
+    cert_file: ""
+    key_file: ""
+    ca_file: ""
+    skip_verify: false
+
 # NATS Messaging Configuration
 nats:
   enabled: true
@@ -97,27 +117,53 @@ nats:
   reconnect_wait: "2s"
   connection_timeout: "2s"
   
-  # Authentication (Choose one method or none)
-  # 1. Token Auth
-  # token: "my-token"
-  
-  # 2. User/Pass Auth
-  # username: "user"
-  # password: "password"
-  
-  # 3. Credentials File (NKeys/User JWT)
-  # creds_file: "/path/to/user.creds"
+  # Authentication
+  auth:
+    enabled: true
+    # token: "my-token"
+    # username: "user"
+    # password: "password"
+    # creds_file: "/path/to/user.creds"
 
   # TLS/SSL
-  use_tls: false
-  skip_verify: false
-  ca_file: ""
-  cert_file: ""
-  key_file: ""
+  tls:
+    enabled: false
+    skip_verify: false
+    ca_file: ""
+    cert_file: ""
+    key_file: ""
   
-  metrics:
-    enabled: true
-    path: "/metrics"
+  # Middleware Configuration (Granular Control)
+  # This section allows you to independently toggle each NATS middleware component.
+  middleware:
+    recovery:
+      enabled: true
+    logging:
+      enabled: true
+    metrics:
+      enabled: true
+      path: "/metrics"
+    tracing:
+      enabled: true
+    circuit_breaker:
+      enabled: true
+      max_requests: 5
+      interval: "60s"
+      timeout: "10s"
+      trip_threshold: 5
+    retry:
+      enabled: true
+      max_attempts: 3
+      initial_interval: "100ms"
+      multiplier: 2.0
+      max_interval: "1s"
+    timeout:
+      enabled: true
+      default: "5s"
+    rate_limit:
+      enabled: true
+      requests_per_second: 100
+      burst: 200
 
 # Database Configuration (GORM)
 database:
@@ -142,6 +188,6 @@ database:
 # Dynamic Service Toggle
 # Enable/Disable individual services loaded by the ServiceManager
 services:
-  webdemosvc: 
+  natdemo:
     enabled: true
-  natsdemosvc: true
+    name: "natdemo"

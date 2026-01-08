@@ -17,18 +17,13 @@ import (
 func TestTelemetry(t *testing.T) {
 	// Setup
 	gin.SetMode(gin.TestMode)
-	cfg := config.Config{
-		Tracing: config.TracingConfig{
-			Enabled:     false, // Disable exporter for test
-			ServiceName: "test-service",
-		},
-		Metrics: config.MetricsConfig{
-			Enabled: true,
-		},
+	tracingCfg := config.TracingConfig{
+		Enabled:     false, // Disable exporter for test
+		ServiceName: "test-service",
 	}
 
 	// 1. Test Init
-	shutdown, err := Init(cfg)
+	shutdown, err := Init(tracingCfg)
 	assert.NoError(t, err)
 	defer shutdown(context.Background())
 

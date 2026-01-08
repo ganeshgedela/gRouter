@@ -31,9 +31,11 @@ func TestNATSConfig(t *testing.T) {
 		MaxReconnects:     20,
 		ReconnectWait:     3 * time.Second,
 		ConnectionTimeout: 10 * time.Second,
-		Token:             "test-token",
-		Username:          "testuser",
-		Password:          "testpass",
+		Auth: AuthConfig{
+			Token:    "test-token",
+			Username: "testuser",
+			Password: "testpass",
+		},
 	}
 
 	if nats.URL != "nats://test:4222" {
@@ -52,16 +54,16 @@ func TestNATSConfig(t *testing.T) {
 		t.Errorf("ConnectionTimeout = %v, want %v", nats.ConnectionTimeout, 10*time.Second)
 	}
 
-	if nats.Token != "test-token" {
-		t.Errorf("Token = %v, want %v", nats.Token, "test-token")
+	if nats.Auth.Token != "test-token" {
+		t.Errorf("Token = %v, want %v", nats.Auth.Token, "test-token")
 	}
 
-	if nats.Username != "testuser" {
-		t.Errorf("Username = %v, want %v", nats.Username, "testuser")
+	if nats.Auth.Username != "testuser" {
+		t.Errorf("Username = %v, want %v", nats.Auth.Username, "testuser")
 	}
 
-	if nats.Password != "testpass" {
-		t.Errorf("Password = %v, want %v", nats.Password, "testpass")
+	if nats.Auth.Password != "testpass" {
+		t.Errorf("Password = %v, want %v", nats.Auth.Password, "testpass")
 	}
 }
 
@@ -174,15 +176,15 @@ func TestNATSConfigWithoutAuth(t *testing.T) {
 		t.Error("ConnectionTimeout mismatch")
 	}
 
-	if nats.Token != "" {
+	if nats.Auth.Token != "" {
 		t.Error("Token should be empty when not set")
 	}
 
-	if nats.Username != "" {
+	if nats.Auth.Username != "" {
 		t.Error("Username should be empty when not set")
 	}
 
-	if nats.Password != "" {
+	if nats.Auth.Password != "" {
 		t.Error("Password should be empty when not set")
 	}
 }
@@ -254,9 +256,11 @@ func TestConfigTypes(t *testing.T) {
 			MaxReconnects:     5,
 			ReconnectWait:     1 * time.Second,
 			ConnectionTimeout: 3 * time.Second,
-			Token:             "token123",
-			Username:          "user",
-			Password:          "pass",
+			Auth: AuthConfig{
+				Token:    "token123",
+				Username: "user",
+				Password: "pass",
+			},
 		},
 		Log: LogConfig{
 			Level:      "debug",

@@ -17,7 +17,7 @@ func TestSubscriber_Pull_Integration(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -53,8 +53,8 @@ func TestSubscriber_Pull_Integration(t *testing.T) {
 	}
 	defer js.DeleteStream(streamName)
 
-	publisher := NewPublisher(client, "test-service")
-	subscriber := NewSubscriber(client, "test-service")
+	publisher := NewPublisher(client)
+	subscriber := NewSubscriber(client)
 	defer subscriber.Close()
 
 	// Publish some messages
@@ -67,14 +67,19 @@ func TestSubscriber_Pull_Integration(t *testing.T) {
 
 	// Subscribe using Pull Consumer
 	received := make(chan int, 5)
-	err = subscriber.SubscribePull("test.pull.event", "test-durable", func(ctx context.Context, subject string, msg *MessageEnvelope) error {
+	opts := &SubscribeOptions{
+		Durable:      "test-durable",
+		BatchSize:    2,
+		FetchTimeout: 1 * time.Second,
+	}
+	err = subscriber.SubscribePull(context.Background(), "test.pull.event", func(ctx context.Context, subject string, msg *MessageEnvelope) error {
 		var data map[string]int
 		if err := json.Unmarshal(msg.Data, &data); err != nil {
 			return err
 		}
 		received <- data["id"]
 		return nil
-	}, WithBatchSize(2), WithFetchTimeout(1*time.Second))
+	}, opts)
 
 	if err != nil {
 		t.Fatalf("SubscribePull failed: %v", err)

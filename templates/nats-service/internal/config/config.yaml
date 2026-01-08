@@ -1,0 +1,92 @@
+# NATS Worker Service Configuration
+
+app:
+  name: "nats-worker"
+  version: "1.0.0"
+  environment: "development"
+
+# Logging Configuration
+logging:
+  level: "info"           # debug, info, warn, error
+  encoding: "json"        # json or console
+  output_paths:
+    - "stdout"
+  error_output_paths:
+    - "stderr"
+
+# NATS Configuration
+nats:
+  url: "nats://localhost:4222"
+  max_reconnects: 10
+  reconnect_wait: "2s"
+  connection_timeout: "5s"
+  drain_timeout: "30s"
+
+  # Authentication (choose one)
+  auth:
+    token: ""
+    username: ""
+    password: ""
+    creds_file: ""
+
+  # TLS Configuration
+  tls:
+    enabled: false
+    skip_verify: false
+    ca_file: ""
+    cert_file: ""
+    key_file: ""
+
+  # Middleware Configuration
+  middleware:
+    recovery:
+      enabled: true
+    
+    metrics:
+      enabled: true
+      path: "/metrics"
+    
+    tracing:
+      enabled: true
+    
+    logging:
+      enabled: true
+    
+    circuit_breaker:
+      enabled: true
+      max_requests: 10
+      interval: "60s"
+      timeout: "10s"
+      trip_threshold: 5
+    
+    retry:
+      enabled: true
+      max_attempts: 3
+      initial_interval: "100ms"
+      multiplier: 2.0
+      max_interval: "2s"
+    
+    timeout:
+      enabled: true
+      default: "5s"
+    
+    rate_limit:
+      enabled: true
+      requests_per_second: 100
+      burst: 200
+
+# Service Registry Configuration
+# Services are registered via factory pattern
+services:
+  users:
+    enabled: true
+    name: "users_service"
+    worker_count: 3
+    timeout: "10s"
+  
+  orders:
+    enabled: true
+    name: "orders_service"
+    worker_count: 3
+    timeout: "10s"
+

@@ -1,0 +1,23 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+# Proto files are generated manually with:
+# protoc --go_out=. --go_opt=paths=source_relative \
+#        --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+#        hello.proto
+
+go_library(
+    name = "proto",
+    srcs = [
+        "hello.pb.go",
+        "hello_grpc.pb.go",
+    ],
+    importpath = "grouter/templates/grpc-service/api/proto",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//codes",
+        "@org_golang_google_grpc//status",
+        "@org_golang_google_protobuf//reflect/protoreflect",
+        "@org_golang_google_protobuf//runtime/protoimpl",
+    ],
+)

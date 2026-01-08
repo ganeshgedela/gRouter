@@ -1,0 +1,34 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "natdemo",
+    srcs = [
+        "config.go",
+        "metrics.go",
+        "nats.go",
+        "service.go",
+    ],
+    importpath = "grouter/services/natsdemosvc/internal/pkg/natdemo",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/manager",
+        "//pkg/messaging/nats",
+        "@com_github_go_viper_mapstructure_v2//:mapstructure",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "natdemo_test",
+    srcs = ["natdemo_test.go"],
+    embed = [":natdemo"],
+    deps = [
+        "//pkg/manager",
+        "//pkg/messaging/nats",
+        "@com_github_nats_io_nats_go//:nats_go",
+        "@com_github_prometheus_client_golang//prometheus/testutil",
+        "@com_github_stretchr_testify//assert",
+        "@org_uber_go_zap//:zap",
+    ],
+)

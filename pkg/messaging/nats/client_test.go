@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +19,7 @@ func TestNewClient(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
-				URL:               "nats://localhost:4222",
+				URL:               GetTestNATSURL(nil),
 				MaxReconnects:     10,
 				ReconnectWait:     2 * time.Second,
 				ConnectionTimeout: 5 * time.Second,
@@ -58,7 +59,7 @@ func TestNewClient(t *testing.T) {
 func TestClient_IsConnected(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -76,14 +77,13 @@ func TestClient_IsConnected(t *testing.T) {
 }
 
 func TestClient_ConnectAndClose(t *testing.T) {
-	// Skip if NATS server is not available
-	if testing.Short() {
-		t.Skip("Skipping integration test")
-	}
+	// Start embedded server
+	s := RunTestServer(nil)
+	defer s.Shutdown()
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               s.ClientURL(),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -96,12 +96,10 @@ func TestClient_ConnectAndClose(t *testing.T) {
 
 	// Test connection
 	err = client.Connect()
-	if err != nil || !client.IsConnected() {
-		t.Skipf("NATS server not available or not connected: %v", err)
-		return
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
 	}
 
-	// Should be connected
 	if !client.IsConnected() {
 		t.Error("Client should be connected after Connect()")
 	}
@@ -123,8 +121,12 @@ func TestClient_ConnectAndClose(t *testing.T) {
 
 func TestClient_Conn(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
+	// Start embedded server
+	s := RunTestServer(nil)
+	defer s.Shutdown()
+
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               s.ClientURL(), // Connect to real server to get non-nil conn
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -135,9 +137,16 @@ func TestClient_Conn(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Should return nil before connection
+	// Pre-connect check
 	if client.Conn() != nil {
 		t.Error("Conn() should return nil before Connect()")
+	}
+
+	err = client.Connect()
+	assert.NoError(t, err)
+
+	if client.Conn() == nil {
+		t.Error("Conn() should not be nil after Connect()")
 	}
 }
 
@@ -151,8 +160,10 @@ func TestClient_WithAuthentication(t *testing.T) {
 		{
 			name: "with token",
 			config: Config{
-				URL:               "nats://localhost:4222",
-				Token:             "test-token",
+				URL: GetTestNATSURL(nil),
+				Auth: AuthConfig{
+					Token: "test-token",
+				},
 				MaxReconnects:     10,
 				ReconnectWait:     2 * time.Second,
 				ConnectionTimeout: 5 * time.Second,
@@ -161,9 +172,11 @@ func TestClient_WithAuthentication(t *testing.T) {
 		{
 			name: "with username and password",
 			config: Config{
-				URL:               "nats://localhost:4222",
-				Username:          "testuser",
-				Password:          "testpass",
+				URL: GetTestNATSURL(nil),
+				Auth: AuthConfig{
+					Username: "testuser",
+					Password: "testpass",
+				},
 				MaxReconnects:     10,
 				ReconnectWait:     2 * time.Second,
 				ConnectionTimeout: 5 * time.Second,

@@ -3,366 +3,378 @@ package manager
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"grouter/pkg/config"
-	"grouter/pkg/health"
-	"grouter/pkg/logger"
-	messaging "grouter/pkg/messaging/nats"
-	"grouter/pkg/telemetry"
-	"grouter/pkg/web"
 
+	"github.com/go-viper/mapstructure/v2"
 	"go.uber.org/zap"
 )
 
+// Option configures the ServiceManager.
+type Option func(*ServiceManager)
+
+// WithShutdownTimeout sets the timeout for graceful shutdown.
+func WithShutdownTimeout(timeout time.Duration) Option {
+	return func(m *ServiceManager) {
+		m.shutdownTimeout = timeout
+	}
+}
+
+// WithMonitoringInterval sets the interval for health checks.
+func WithMonitoringInterval(interval time.Duration) Option {
+	return func(m *ServiceManager) {
+		m.monitorInterval = interval
+	}
+}
+
 // ServiceManager orchestrates the application lifecycle and message routing.
 type ServiceManager struct {
-	cfg *config.Config
-	log *zap.Logger
+	deps Deps
 
-	router *ServiceRouter
+	store *ServiceStore
 
-	messenger *messaging.Messenger
-
-	webServer *web.Server
-
-	health  *health.HealthService
-	timeout time.Duration
-
-	// Cleanup for OpenTelemetry
-	tracerShutdown func(context.Context) error
+	shutdownTimeout time.Duration
+	monitorInterval time.Duration
 }
 
-// NewServiceManager creates a new ServiceManager with default settings.
-func NewServiceManager() *ServiceManager {
-	return &ServiceManager{
-		router:  NewServiceRouter(),
-		timeout: 10 * time.Second,
+// NewServiceManager creates a new ServiceManager with dependencies.
+func NewServiceManager(deps Deps, opts ...Option) *ServiceManager {
+	m := &ServiceManager{
+		deps:            deps,
+		store:           NewServiceStore(),
+		shutdownTimeout: 30 * time.Second,
+		monitorInterval: 5 * time.Second,
 	}
+	m.deps.Store = m.store
+
+	for _, opt := range opts {
+		opt(m)
+	}
+
+	return m
 }
 
-// Init initializes configuration, logger, NATS, and registers services.
-func (m *ServiceManager) Init() error {
-	if err := m.initConfig(); err != nil {
-		return err
-	}
-	if err := m.initLogger(); err != nil {
-		return err
-	}
+// BuildFromConfig instantiates services based on the configuration using registered factories.
+func (m *ServiceManager) BuildFromConfig() error {
+	m.Logger().Info("Building services from configuration...")
 
-	// Initialize OpenTelemetry
-	shutdown, err := telemetry.InitTracer(m.cfg.Tracing)
-	if err != nil {
-		return fmt.Errorf("failed to initialize tracer: %w", err)
-	}
-	m.tracerShutdown = shutdown
+	for id, svcCfg := range m.Config().Services {
+		// 1. Check if enabled
+		var genericCfg struct {
+			Enabled bool `mapstructure:"enabled"`
+		}
+		if err := mapstructure.Decode(svcCfg, &genericCfg); err != nil {
+			m.Logger().Warn("Failed to decode service config for enabled check", zap.String("service", id), zap.Error(err))
+			continue
+		}
 
-	m.log.Info("Initializing gRouter service",
-		zap.String("name", m.cfg.App.Name),
-		zap.String("version", m.cfg.App.Version),
-		zap.String("environment", m.cfg.App.Environment),
-	)
+		if !genericCfg.Enabled {
+			m.Logger().Debug("Service disabled in config", zap.String("service", id))
+			continue
+		}
 
-	// Register health service
-	m.health = health.NewHealthService()
+		// 2. Find Factory
+		factory, exists := GetFactory(id)
+		if !exists {
+			// Fail fast if a service is enabled but code is missing
+			return fmt.Errorf("service enabled in config but no factory registered: %s", id)
+		}
 
-	return nil
-}
+		// 3. Instantiate
+		m.Logger().Debug("Creating service", zap.String("service", id))
+		svc, err := factory(m.deps)
+		if err != nil {
+			return fmt.Errorf("failed to create service %s: %w", id, err)
+		}
 
-func (m *ServiceManager) initConfig() error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load configuration: %w", err)
-	}
-	m.cfg = cfg
-	return nil
-}
+		// 3.5 Inject Config
+		if cfgAware, ok := svc.(ConfigAware); ok {
+			if cfg, ok := svcCfg.(map[string]interface{}); ok {
+				if err := cfgAware.InitConfig(cfg); err != nil {
+					return fmt.Errorf("failed to init config for service %s: %w", id, err)
+				}
+			} else {
+				// Try decode if it's not a map (e.g. mapstructure hook?)
+				// Viper usually gives map[string]interface{}
+				// But let's log warning if mismatch?
+				// Actually svcCfg is from m.Config().Services which is ServicesConfig which is map[string]interface{}.
+				// But the value in that map can be anything.
+				// Let's assume it transforms.
+				// If we can't assert, we skip config? Or error?
+				// Let's try mapstructure decode into generic map if assertion fails?
+				// Safer to just try map conversion or log warning.
+				m.Logger().Warn("Service config is not map[string]interface{}", zap.String("service", id))
+			}
+		}
 
-func (m *ServiceManager) initLogger() error {
-	if m.cfg == nil {
-		return fmt.Errorf("init logger: config is nil")
-	}
-	log, err := logger.New(logger.Config{
-		Level:      m.cfg.Log.Level,
-		Format:     m.cfg.Log.Format,
-		OutputPath: m.cfg.Log.OutputPath,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to initialize logger: %w", err)
-	}
-	m.log = log
-	return nil
-}
-
-func (m *ServiceManager) InitNATS() error {
-	if m.cfg == nil || m.log == nil {
-		return fmt.Errorf("init nats: config or logger is nil")
-	}
-
-	if !m.cfg.NATS.Enabled {
-		//m.log.Info("NATS disabled")
-		return nil
+		// 4. Register
+		m.store.Add(svc.ID(), svc) // Use svc.ID() which is reliable
 	}
 
-	// Initialize Messenger
-	m.messenger = &messaging.Messenger{}
-	if err := m.messenger.Init(messaging.Config{
-		URL:               m.cfg.NATS.URL,
-		MaxReconnects:     m.cfg.NATS.MaxReconnects,
-		ReconnectWait:     m.cfg.NATS.ReconnectWait,
-		ConnectionTimeout: m.cfg.NATS.ConnectionTimeout,
-		Token:             m.cfg.NATS.Token,
-		Username:          m.cfg.NATS.Username,
-		Password:          m.cfg.NATS.Password,
-		CredsFile:         m.cfg.NATS.CredsFile,
-		UseTLS:            m.cfg.NATS.UseTLS,
-		SkipVerify:        m.cfg.NATS.SkipVerify,
-		CAFile:            m.cfg.NATS.CAFile,
-		CertFile:          m.cfg.NATS.CertFile,
-		KeyFile:           m.cfg.NATS.KeyFile,
-		Metrics: messaging.MetricsConfig{
-			Enabled: m.cfg.NATS.Metrics.Enabled,
-			Path:    m.cfg.NATS.Metrics.Path,
-		},
-		Logging: messaging.LoggingConfig{
-			Enabled: m.cfg.NATS.Logging.Enabled,
-		},
-		Tracing: messaging.TracingConfig{
-			Enabled: m.cfg.Tracing.Enabled,
-		},
-	}, m.log, m.cfg.App.Name); err != nil {
-		return fmt.Errorf("failed to initialize messenger: %w", err)
-	}
-
-	m.log.Info("NATS initialized via Messenger",
-		zap.String("url", m.cfg.NATS.URL),
-		zap.String("app", m.cfg.App.Name),
-	)
-
-	return nil
-}
-
-func (m *ServiceManager) InitWebServer() error {
-	if m.cfg == nil || m.log == nil {
-		return fmt.Errorf("init web server: config or logger is nil")
-	}
-
-	if !m.cfg.Web.Enabled {
-		m.log.Info("Web server disabled")
-		return nil
-	}
-
-	webConfig := web.Config{
-		Port:            m.cfg.Web.Port,
-		ReadTimeout:     m.cfg.Web.ReadTimeout,
-		WriteTimeout:    m.cfg.Web.WriteTimeout,
-		ShutdownTimeout: m.cfg.Web.ShutdownTimeout,
-		Mode:            m.cfg.Web.Mode,
-		Metrics: web.MetricsConfig{
-			Enabled: m.cfg.Web.Metrics.Enabled,
-			Path:    m.cfg.Web.Metrics.Path,
-		},
-		Tracing: web.TracingConfig{
-			Enabled:     m.cfg.Tracing.Enabled,
-			ServiceName: m.cfg.Tracing.ServiceName,
-		},
-		TLS: web.TLSConfig{
-			Enabled:  m.cfg.Web.TLS.Enabled,
-			CertFile: m.cfg.Web.TLS.CertFile,
-			KeyFile:  m.cfg.Web.TLS.KeyFile,
-		},
-		CORS: web.CORSConfig{
-			Enabled:          m.cfg.Web.CORS.Enabled,
-			AllowedOrigins:   m.cfg.Web.CORS.AllowedOrigins,
-			AllowedMethods:   m.cfg.Web.CORS.AllowedMethods,
-			AllowedHeaders:   m.cfg.Web.CORS.AllowedHeaders,
-			ExposedHeaders:   m.cfg.Web.CORS.ExposedHeaders,
-			AllowCredentials: m.cfg.Web.CORS.AllowCredentials,
-			MaxAge:           m.cfg.Web.CORS.MaxAge,
-		},
-		Security: web.SecurityConfig{
-			Enabled:               m.cfg.Web.Security.Enabled,
-			XSSProtection:         m.cfg.Web.Security.XSSProtection,
-			ContentTypeNosniff:    m.cfg.Web.Security.ContentTypeNosniff,
-			XFrameOptions:         m.cfg.Web.Security.XFrameOptions,
-			HSTSMaxAge:            m.cfg.Web.Security.HSTSMaxAge,
-			HSTSExcludeSubdomains: m.cfg.Web.Security.HSTSExcludeSubdomains,
-			ContentSecurityPolicy: m.cfg.Web.Security.ContentSecurityPolicy,
-			ReferrerPolicy:        m.cfg.Web.Security.ReferrerPolicy,
-			CustomHeaders:         m.cfg.Web.Security.CustomHeaders,
-		},
-		RateLimit: web.RateLimitConfig{
-			Enabled:           m.cfg.Web.RateLimit.Enabled,
-			RequestsPerSecond: m.cfg.Web.RateLimit.RequestsPerSecond,
-			Burst:             m.cfg.Web.RateLimit.Burst,
-		},
-		Swagger: web.SwaggerConfig{
-			Enabled: m.cfg.Web.Swagger.Enabled,
-			Path:    m.cfg.Web.Swagger.Path,
-		},
-		Logging: web.LoggingConfig{
-			Enabled: m.cfg.Web.Logging.Enabled,
-		},
-		Auth: web.AuthConfig{
-			Enabled:  m.cfg.Web.Auth.Enabled,
-			Issuer:   m.cfg.Web.Auth.Issuer,
-			Audience: m.cfg.Web.Auth.Audience,
-		},
-	}
-	m.webServer = web.NewWebServer(webConfig, m.log, m.health)
-
-	// Start web server
-	if err := m.webServer.Start(); err != nil {
-		return fmt.Errorf("failed to start web server: %w", err)
-	}
-
+	m.Logger().Info("Built services", zap.Strings("services", m.store.List()))
 	return nil
 }
 
 // RegisterService registers a service with the manager.
-// It automatically detects and registers capabilities (Web, NATS).
 func (m *ServiceManager) RegisterService(svc Service) error {
-	if svc == nil {
-		return nil
-	}
-	m.router.Register(svc.Name(), svc)
-
-	// Check for Web Capability
-	if m.webServer != nil {
-		if webSvc, ok := svc.(web.WebService); ok {
-			m.webServer.RegisterWebService(webSvc)
-		}
-	}
-
+	m.store.Add(svc.Name(), svc)
 	return nil
-}
-
-// ReRegisterServices iterates over all currently defined services and re-registers them.
-// This is useful during a restart to ensure all services are active.
-func (m *ServiceManager) ReRegisterServices() {
-	for _, serviceName := range m.ListServices() {
-		if svc, ok := m.GetService(serviceName); ok {
-			m.RegisterService(svc)
-		}
-	}
 }
 
 // UnregisterService removes a service from the manager.
 func (m *ServiceManager) UnregisterService(name string) {
-	m.router.Unregister(name)
+	m.store.Delete(name)
+}
+
+// GetService retrieves a service by name.
+func (m *ServiceManager) GetService(name string) (Service, error) {
+	svc, ok := m.store.Get(name)
+	if !ok {
+		return nil, fmt.Errorf("service not found: %s", name)
+	}
+	return svc, nil
+}
+
+// Run starts the manager and blocks until a signal is received or context is done.
+func (m *ServiceManager) Run(ctx context.Context) error {
+	quit := make(chan os.Signal, 1) // Initialize quit channel
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+
+	if err := m.InitServices(ctx); err != nil {
+		return err
+	}
+
+	if err := m.StartServices(ctx); err != nil {
+		return err
+	}
+
+	// Start Supervision Loop
+	// Start Supervision Loop
+	go m.MonitorServices(ctx, quit)
+
+	select {
+	case sig := <-quit:
+		m.Logger().Info("Received shutdown signal", zap.String("signal", sig.String()))
+	case <-ctx.Done():
+		m.Logger().Info("Context cancelled")
+	}
+
+	m.Logger().Info("Shutting down services...")
+
+	// Create shutdown context with timeout
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), m.shutdownTimeout)
+	defer cancel()
+
+	if err := m.StopServices(shutdownCtx); err != nil {
+		m.Logger().Error("Error during shutdown", zap.Error(err))
+		// We return the error but still try to cleanup other things?
+		// Usually yes.
+	}
+
+	// Cleanup store
+	if m.store != nil {
+		m.store.DeleteAll()
+	}
+
+	// Flush logger
+	// m.log is removed, use m.Logger() but we can't easily sync it if it's external deps
+	// But we can try type assertion or just ignore.
+	// m.Logger().Sync() might be valid if zap
+	_ = m.Logger().Sync()
+
+	m.Logger().Info("Shutdown complete")
+	return nil
+}
+
+// MonitorServices periodically checks the health of running services.
+func (m *ServiceManager) MonitorServices(ctx context.Context, quit chan<- os.Signal) {
+	ticker := time.NewTicker(m.monitorInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			services := m.store.All()
+			for _, svc := range services {
+				status := svc.Status()
+				if status == StatusFailed || status == StatusUnhealthy {
+					m.Logger().Error("Service is unhealthy",
+						zap.String("service", svc.Name()),
+						zap.String("status", string(status)),
+						zap.Error(svc.LastError()),
+					)
+					// Future: Trigger restart logic here
+				}
+			}
+		}
+	}
 }
 
 // Logger returns the initialized logger.
 func (m *ServiceManager) Logger() *zap.Logger {
-	return m.log
+	return m.deps.Logger
 }
 
-// Publisher returns the initialized NATS publisher.
-func (m *ServiceManager) Publisher() messaging.Publisher {
-	return m.messenger.Publisher
-}
-
-// Messenger returns the initialized Messenger instance
-func (m *ServiceManager) Messenger() *messaging.Messenger {
-	return m.messenger
-}
-
+// Config returns the configuration.
 func (m *ServiceManager) Config() *config.Config {
-	return m.cfg
+	return m.deps.Config
 }
 
-// Health returns the shared HealthService instance
-func (m *ServiceManager) Health() *health.HealthService {
-	return m.health
-}
-
-func (m *ServiceManager) WebServer() *web.Server {
-	return m.webServer
-}
-
+// ListServices returns a list of all registered service names.
 func (m *ServiceManager) ListServices() []string {
-	return m.router.store.List()
+	return m.store.List()
 }
 
-func (m *ServiceManager) GetService(name string) (Service, bool) {
-	return m.router.store.Get(name)
+// resolveDependencies returns services sorted by dependency order (Topological Sort).
+func (m *ServiceManager) resolveDependencies() ([]Service, error) {
+	services := m.store.All()
+	serviceMap := make(map[string]Service)
+	for _, s := range services {
+		serviceMap[s.Name()] = s
+	}
+
+	visited := make(map[string]bool)
+	tempVisited := make(map[string]bool) // For cycle detection
+	var sorted []Service
+
+	var visit func(string) error
+	visit = func(name string) error {
+		if tempVisited[name] {
+			return fmt.Errorf("circular dependency detected involving service: %s", name)
+		}
+		if visited[name] {
+			return nil
+		}
+
+		tempVisited[name] = true
+		svc, exists := serviceMap[name]
+		if !exists {
+			return fmt.Errorf("service %s depends on unknown service", name)
+		}
+
+		for _, dep := range svc.Dependencies() {
+			// Check if dependency exists in the registry
+			if _, ok := serviceMap[dep]; !ok {
+				m.Logger().Warn("Service depends on unregistered service (ignoring dependency)",
+					zap.String("service", name), zap.String("dependency", dep))
+				continue
+			}
+			if err := visit(dep); err != nil {
+				return err
+			}
+		}
+
+		tempVisited[name] = false
+		visited[name] = true
+		sorted = append(sorted, svc)
+		return nil
+	}
+
+	for _, svc := range services {
+		if !visited[svc.Name()] {
+			if err := visit(svc.Name()); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return sorted, nil
 }
 
-// Start begins listening for messages on the configured topics.
-func (m *ServiceManager) Start(ctx context.Context) error {
-	m.log.Debug("ServiceManager started successfully")
-	return nil
-}
+// InitServices initializes all registered services in dependency order.
+func (m *ServiceManager) InitServices(ctx context.Context) error {
+	if m.store == nil {
+		return nil
+	}
 
-func (m *ServiceManager) onNATSMessage(ctx context.Context, subject string, env *messaging.MessageEnvelope) error {
-	m.log.Debug("Received message",
-		zap.String("subject", subject),
-		zap.String("type", env.Type),
-		zap.String("id", env.ID),
-	)
-	//topic := strings.TrimPrefix(subject, m.cfg.App.Name+".")
-	topic := env.Type
-	err := m.router.HandleMessage(ctx, topic, env)
+	sortedServices, err := m.resolveDependencies()
 	if err != nil {
-		m.log.Error("HandleMessage failed",
-			zap.Error(err),
-			zap.String("topic", topic),
-			zap.String("id", env.ID),
-		)
-		if env.Reply != "" && m.messenger != nil && m.messenger.Publisher != nil {
-			return m.messenger.Publisher.PublishError(ctx, env.Reply, err.Error())
+		return fmt.Errorf("failed to resolve dependencies: %w", err)
+	}
+
+	for _, svc := range sortedServices {
+		m.Logger().Debug("Initializing service", zap.String("service", svc.Name()))
+
+		if err := svc.Init(ctx); err != nil {
+			return fmt.Errorf("failed to initialize service %s: %w", svc.Name(), err)
 		}
-		return nil
-	}
 
-	return nil
-}
-
-// replyError is deprecated. Use m.messenger.Publisher.PublishError instead.
-// Keeping it removed.
-
-// Stop gracefully shuts down the manager and its components.
-func (m *ServiceManager) Stop(ctx context.Context) error {
-	m.log.Info("Stopping gRouter service")
-
-	if m.messenger != nil {
-		if err := m.messenger.Close(); err != nil {
-			m.log.Error("Failed to close messenger", zap.Error(err))
+		// Capability: WebRoutable
+		if webSvc, ok := svc.(WebRoutable); ok && m.deps.WebRouter != nil {
+			m.Logger().Debug("Registering web routes", zap.String("service", svc.Name()))
+			if err := webSvc.RegisterRoutes(m.deps.WebRouter); err != nil {
+				return fmt.Errorf("failed to register web routes for %s: %w", svc.Name(), err)
+			}
 		}
-	}
-	if m.webServer != nil {
-		if err := m.webServer.Stop(ctx); err != nil {
-			m.log.Error("Failed to stop web server", zap.Error(err))
-		}
-	}
-	if m.log != nil {
-		_ = m.log.Sync()
-	}
 
-	if m.tracerShutdown != nil {
-		if err := m.tracerShutdown(ctx); err != nil {
-			m.log.Warn("Failed to shutdown tracer", zap.Error(err))
+		// Capability: GRPCRoutable
+		if grpcSvc, ok := svc.(GRPCRoutable); ok && m.deps.GRPCServer != nil {
+			m.Logger().Debug("Registering gRPC service", zap.String("service", svc.Name()))
+			if err := grpcSvc.RegisterGRPC(m.deps.GRPCServer); err != nil {
+				return fmt.Errorf("failed to register gRPC service for %s: %w", svc.Name(), err)
+			}
 		}
 	}
 	return nil
 }
 
-func (m *ServiceManager) SubscribeToTopics(topic string, queueGroup string) error {
-	m.log.Info("Subscribing to topics", zap.String("topic", topic))
-
-	if m.messenger == nil {
-		m.log.Warn("NATS disabled or messenger not initialized, skipping subscription", zap.String("topic", topic))
+// StartServices starts all registered services in dependency order.
+func (m *ServiceManager) StartServices(ctx context.Context) error {
+	if m.store == nil {
 		return nil
 	}
 
-	if err := m.messenger.Subscriber.Subscribe(
-		topic,
-		m.onNATSMessage,
-		&messaging.SubscribeOptions{
-			QueueGroup: queueGroup,
-		}); err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
+	sortedServices, err := m.resolveDependencies()
+	if err != nil {
+		return fmt.Errorf("failed to resolve dependencies: %w", err)
 	}
 
+	for _, svc := range sortedServices {
+		m.Logger().Debug("Starting service", zap.String("service", svc.Name()))
+
+		if err := svc.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start service %s: %w", svc.Name(), err)
+		}
+	}
+	return nil
+}
+
+// StopServices stops all registered services in reverse dependency order.
+func (m *ServiceManager) StopServices(ctx context.Context) error {
+	if m.store == nil {
+		return nil
+	}
+
+	sortedServices, err := m.resolveDependencies()
+	if err != nil {
+		return fmt.Errorf("failed to resolve dependencies: %w", err)
+	}
+
+	// Reverse order for shutdown
+	for i := len(sortedServices) - 1; i >= 0; i-- {
+		svc := sortedServices[i]
+		m.Logger().Debug("Stopping service", zap.String("service", svc.Name()))
+
+		if err := svc.Stop(ctx); err != nil {
+			m.Logger().Error("Failed to stop service", zap.String("service", svc.Name()), zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// Stop gracefully shuts down the infrastructure components.
+func (m *ServiceManager) Stop() error {
+	_ = m.Logger().Sync()
+
+	_ = m.StopServices(context.Background())
+	if m.store != nil {
+		m.store.DeleteAll()
+	}
 	return nil
 }

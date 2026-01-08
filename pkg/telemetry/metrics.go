@@ -1,8 +1,6 @@
 package telemetry
 
 import (
-	"grouter/pkg/config"
-
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -36,13 +34,12 @@ var (
 )
 
 // InitMetrics registers the standard metrics with Prometheus
-func InitMetrics(cfg config.MetricsConfig) {
-	if !cfg.Enabled {
-		return
-	}
-	prometheus.MustRegister(httpRequestsTotal)
-	prometheus.MustRegister(httpRequestDuration)
-	prometheus.MustRegister(httpActiveRequests)
+func InitMetrics() {
+	// Register metrics with the global prometheus registry
+	// We use Register instead of MustRegister to avoid panics if called multiple times in tests
+	_ = prometheus.Register(httpRequestsTotal)
+	_ = prometheus.Register(httpRequestDuration)
+	_ = prometheus.Register(httpActiveRequests)
 }
 
 // PrometheusHandler returns a Gin handler for the metrics endpoint

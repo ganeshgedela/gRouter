@@ -9,6 +9,7 @@ go_library(
     importpath = "grouter/pkg/logger",
     visibility = ["//visibility:public"],
     deps = [
+        "@in_gopkg_natefinch_lumberjack_v2//:lumberjack_v2",
         "@org_uber_go_zap//:zap",
         "@org_uber_go_zap//zapcore",
     ],

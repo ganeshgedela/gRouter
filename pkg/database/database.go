@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -19,6 +20,7 @@ import (
 // Database wraps the GORM DB connection
 type Database struct {
 	*gorm.DB
+	logger *zap.Logger
 }
 
 // New creates a new database connection based on configuration
@@ -30,6 +32,10 @@ func New(cfg config.DatabaseConfig, logger *zap.Logger) (*Database, error) {
 		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 			cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode)
 		dialect = postgres.Open(dsn)
+	case "mysql":
+		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+			cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DBName)
+		dialect = mysql.Open(dsn)
 	case "sqlite", "sqlite3":
 		dialect = sqlite.Open(cfg.DBName)
 	default:
@@ -69,7 +75,20 @@ func New(cfg config.DatabaseConfig, logger *zap.Logger) (*Database, error) {
 		sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 	}
 
-	return &Database{DB: db}, nil
+	return &Database{DB: db, logger: logger}, nil
+}
+
+// EnableMetrics starts collecting database metrics
+func (d *Database) EnableMetrics(dbName string, interval time.Duration) error {
+	sqlDB, err := d.DB.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get sql.DB for metrics: %w", err)
+	}
+
+	collector := NewMetricsCollector(dbName, sqlDB)
+	collector.Start(interval)
+	d.logger.Info("Database metrics collection enabled", zap.String("db_name", dbName))
+	return nil
 }
 
 // WithTransaction executes a function within a database transaction

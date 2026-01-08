@@ -1,0 +1,12 @@
+app:
+  name: "grpcdemosvc"
+  version: "1.0.0"
+
+logging:
+  level: "info"
+  encoding: "console"
+
+services:
+  grpcdemo:
+    enabled: true
+    port: 50051

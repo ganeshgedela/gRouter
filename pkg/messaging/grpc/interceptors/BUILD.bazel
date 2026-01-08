@@ -1,0 +1,57 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "interceptors",
+    srcs = [
+        "auth.go",
+        "auth_impl.go",
+        "logging.go",
+        "metrics.go",
+        "ratelimit.go",
+        "recovery.go",
+        "retry.go",
+        "timeout.go",
+        "tracing.go",
+    ],
+    importpath = "grouter/pkg/messaging/grpc/interceptors",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_golang_jwt_jwt_v5//:jwt",
+        "@com_github_prometheus_client_golang//prometheus",
+        "@io_opentelemetry_go_otel//:otel",
+        "@io_opentelemetry_go_otel//attribute",
+        "@io_opentelemetry_go_otel//codes",
+        "@io_opentelemetry_go_otel_trace//:trace",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//codes",
+        "@org_golang_google_grpc//metadata",
+        "@org_golang_google_grpc//peer",
+        "@org_golang_google_grpc//status",
+        "@org_golang_x_time//rate",
+        "@org_uber_go_zap//:zap",
+    ],
+)
+
+go_test(
+    name = "interceptors_test",
+    srcs = [
+        "auth_test.go",
+        "logging_stream_test.go",
+        "logging_test.go",
+        "metrics_test.go",
+        "ratelimit_test.go",
+        "recovery_test.go",
+        "retry_config_test.go",
+        "retry_test.go",
+        "tracing_test.go",
+    ],
+    embed = [":interceptors"],
+    deps = [
+        "@io_opentelemetry_go_otel_trace//noop",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//codes",
+        "@org_golang_google_grpc//metadata",
+        "@org_golang_google_grpc//status",
+        "@org_uber_go_zap//:zap",
+    ],
+)

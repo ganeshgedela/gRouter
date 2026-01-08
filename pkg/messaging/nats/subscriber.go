@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 )
 
@@ -21,15 +20,22 @@ type NATSSubscriber struct {
 	middleware    []SubscriberMiddleware
 	mu            sync.Mutex
 	wg            sync.WaitGroup
+	drainTimeout  time.Duration
 }
 
 // NewSubscriber creates a new subscriber
-func NewSubscriber(client *Client, source string) Subscriber {
+func NewSubscriber(client *Client) Subscriber {
+	timeout := client.config.DrainTimeout
+	if timeout == 0 {
+		timeout = 30 * time.Second // Default safe timeout
+	}
+
 	return &NATSSubscriber{
 		client:        client,
-		source:        source,
+		source:        client.source,
 		subscriptions: make([]*nats.Subscription, 0),
 		middleware:    make([]SubscriberMiddleware, 0),
+		drainTimeout:  timeout,
 	}
 }
 
@@ -44,7 +50,7 @@ func (s *NATSSubscriber) SetValidator(v Validator) {
 }
 
 // Subscribe subscribes to a subject with a handler
-func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *SubscribeOptions) error {
+func (s *NATSSubscriber) Subscribe(ctx context.Context, subject string, handler HandlerFunc, opts *SubscribeOptions) (*nats.Subscription, error) {
 
 	// Setup concurrency control if MaxWorkers is set
 	var sem chan struct{}
@@ -72,33 +78,10 @@ func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *Su
 			return
 		}
 
-		// Extract trace context
-		ctx := otel.GetTextMapPropagator().Extract(context.Background(), metadataCarrier(envelope.Metadata))
-
-		// ✅ capture NATS reply subject for request-reply
+		// Capture NATS reply subject for request-reply
 		if msg.Reply != "" {
 			envelope.Reply = msg.Reply
 		}
-
-		// Validate data if validator is set
-		if s.validator != nil {
-			if err := s.validator.Validate(envelope.Type, envelope.Data); err != nil {
-				s.client.logger.Error("Validation failed",
-					zap.Error(err),
-					zap.String("subject", msg.Subject),
-					zap.String("type", envelope.Type),
-					zap.String("id", envelope.ID),
-				)
-				return
-			}
-		}
-
-		s.client.logger.Debug("Received message",
-			zap.String("subject", msg.Subject),
-			zap.String("type", envelope.Type),
-			zap.String("id", envelope.ID),
-			zap.String("reply", envelope.Reply),
-		)
 
 		// Apply middleware
 		h := handler
@@ -106,8 +89,8 @@ func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *Su
 			h = s.middleware[i](h)
 		}
 
-		// Handle message
-		if err := h(ctx, msg.Subject, &envelope); err != nil {
+		// Handle message (tracing is handled in middleware)
+		if err := h(context.Background(), msg.Subject, &envelope); err != nil {
 			s.client.logger.Error("Handler error",
 				zap.Error(err),
 				zap.String("subject", msg.Subject),
@@ -127,7 +110,7 @@ func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *Su
 	}
 
 	if err != nil {
-		return fmt.Errorf("failed to subscribe: %w", err)
+		return nil, fmt.Errorf("failed to subscribe: %w", err)
 	}
 
 	// Store subscription
@@ -135,7 +118,7 @@ func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *Su
 	s.subscriptions = append(s.subscriptions, sub)
 	s.mu.Unlock()
 
-	s.client.logger.Info("Subscribed to subject",
+	s.client.logger.Debug("Subscribed to subject",
 		zap.String("subject", subject),
 		zap.String("queue_group", func() string {
 			if opts != nil {
@@ -145,109 +128,88 @@ func (s *NATSSubscriber) Subscribe(subject string, handler HandlerFunc, opts *Su
 		}()),
 	)
 
-	return nil
+	return sub, nil
 }
 
 // Unsubscribe unsubscribes from all subscriptions
-func (s *NATSSubscriber) Unsubscribe() error {
+func (s *NATSSubscriber) Unsubscribe(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, sub := range s.subscriptions {
-		if err := sub.Unsubscribe(); err != nil {
-			s.client.logger.Error("Failed to unsubscribe", zap.Error(err))
+		if sub.IsValid() {
+			if err := sub.Unsubscribe(); err != nil {
+				if err != nats.ErrBadSubscription && err != nats.ErrConnectionClosed {
+					s.client.logger.Error("Failed to unsubscribe", zap.Error(err))
+				}
+			}
 		}
 	}
 
 	s.subscriptions = make([]*nats.Subscription, 0)
-	s.client.logger.Info("Unsubscribed from all subjects")
+	s.client.logger.Debug("Unsubscribed from all subjects")
+	return nil
+}
+
+// UnsubscribeSubject unsubscribes from a specific subject
+func (s *NATSSubscriber) UnsubscribeSubject(ctx context.Context, subject string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var active []*nats.Subscription
+	for _, sub := range s.subscriptions {
+		if sub.Subject == subject {
+			if sub.IsValid() {
+				if err := sub.Unsubscribe(); err != nil {
+					if err != nats.ErrBadSubscription && err != nats.ErrConnectionClosed {
+						s.client.logger.Error("Failed to unsubscribe from subject", zap.String("subject", subject), zap.Error(err))
+					}
+				}
+			}
+			s.client.logger.Debug("Unsubscribed from subject", zap.String("subject", subject))
+		} else {
+			active = append(active, sub)
+		}
+	}
+	s.subscriptions = active
 	return nil
 }
 
 // SubscribePush subscribes to a JetStream subject with a handler
-func (s *NATSSubscriber) SubscribePush(subject string, handler HandlerFunc, opts ...nats.SubOpt) error {
+func (s *NATSSubscriber) SubscribePush(ctx context.Context, subject string, handler HandlerFunc, opts *SubscribeOptions) (*nats.Subscription, error) {
 	js, err := s.client.JetStream()
 	if err != nil {
-		return err
+		return nil, err
+	}
+
+	var subOpts []nats.SubOpt
+	if opts != nil {
+		subOpts = opts.NatsOptions
+		if opts.Durable != "" {
+			subOpts = append(subOpts, nats.Durable(opts.Durable))
+		}
+		if opts.AckWait > 0 {
+			subOpts = append(subOpts, nats.AckWait(opts.AckWait))
+		}
+		if opts.MaxDeliveries > 0 {
+			subOpts = append(subOpts, nats.MaxDeliver(opts.MaxDeliveries))
+		}
+		// Always use explicit ack
+		subOpts = append(subOpts, nats.AckExplicit())
+	} else {
+		subOpts = []nats.SubOpt{nats.AckExplicit()}
 	}
 
 	// Create message handler wrapper
 	msgHandler := func(msg *nats.Msg) {
 		s.wg.Add(1)
 		defer s.wg.Done()
-
-		// Unmarshal envelope
-		var envelope MessageEnvelope
-		if err := json.Unmarshal(msg.Data, &envelope); err != nil {
-			s.client.logger.Error("Failed to unmarshal JetStream message",
-				zap.Error(err),
-				zap.String("subject", msg.Subject),
-			)
-			// We don't Ack here, so it will be redelivered based on AckWait
-			return
-		}
-
-		// Extract trace context
-		ctx := otel.GetTextMapPropagator().Extract(context.Background(), metadataCarrier(envelope.Metadata))
-
-		// Capture NATS reply subject
-		if msg.Reply != "" {
-			envelope.Reply = msg.Reply
-		}
-
-		// Validate data if validator is set
-		if s.validator != nil {
-			if err := s.validator.Validate(envelope.Type, envelope.Data); err != nil {
-				s.client.logger.Error("JetStream validation failed",
-					zap.Error(err),
-					zap.String("subject", msg.Subject),
-					zap.String("type", envelope.Type),
-					zap.String("id", envelope.ID),
-				)
-				// We don't Ack here, so it will be redelivered or go to DLQ
-				return
-			}
-		}
-
-		s.client.logger.Debug("Received JetStream message",
-			zap.String("subject", msg.Subject),
-			zap.String("type", envelope.Type),
-			zap.String("id", envelope.ID),
-		)
-
-		// Apply middleware
-		h := handler
-		for i := len(s.middleware) - 1; i >= 0; i-- {
-			h = s.middleware[i](h)
-		}
-
-		// Handle message
-		if err := h(ctx, msg.Subject, &envelope); err != nil {
-			s.client.logger.Error("JetStream handler error",
-				zap.Error(err),
-				zap.String("subject", msg.Subject),
-				zap.String("message_id", envelope.ID),
-			)
-			// Explicitly Nak to trigger redelivery
-			if err := msg.Nak(); err != nil {
-				s.client.logger.Error("Failed to nak JetStream message", zap.Error(err))
-			}
-			return
-		}
-
-		// Acknowledge message
-		if err := msg.Ack(); err != nil {
-			s.client.logger.Error("Failed to ack JetStream message",
-				zap.Error(err),
-				zap.String("subject", msg.Subject),
-				zap.String("message_id", envelope.ID),
-			)
-		}
+		s.processJetStreamMessage(msg, handler, opts)
 	}
 
-	sub, err := js.Subscribe(subject, msgHandler, opts...)
+	sub, err := js.Subscribe(subject, msgHandler, subOpts...)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to JetStream: %w", err)
+		return nil, fmt.Errorf("failed to subscribe to JetStream: %w", err)
 	}
 
 	// Store subscription
@@ -255,33 +217,37 @@ func (s *NATSSubscriber) SubscribePush(subject string, handler HandlerFunc, opts
 	s.subscriptions = append(s.subscriptions, sub)
 	s.mu.Unlock()
 
-	s.client.logger.Info("Subscribed to JetStream subject",
+	s.client.logger.Debug("Subscribed to JetStream subject",
 		zap.String("subject", subject),
 	)
 
-	return nil
+	return sub, nil
 }
 
 // SubscribePull subscribes to a JetStream subject using a pull consumer
-func (s *NATSSubscriber) SubscribePull(subject, durable string, handler HandlerFunc, opts ...PullOption) error {
+func (s *NATSSubscriber) SubscribePull(ctx context.Context, subject string, handler HandlerFunc, opts *SubscribeOptions) error {
 	js, err := s.client.JetStream()
 	if err != nil {
 		return err
 	}
 
-	// Default options
-	options := &PullOptions{
-		BatchSize:    10,
-		FetchTimeout: 5 * time.Second,
+	if opts == nil || opts.Durable == "" {
+		return fmt.Errorf("durable name required for pull subscription")
 	}
 
-	// Apply options
-	for _, opt := range opts {
-		opt(options)
+	// Default options
+	batchSize := 10
+	fetchTimeout := 5 * time.Second
+
+	if opts.BatchSize > 0 {
+		batchSize = opts.BatchSize
+	}
+	if opts.FetchTimeout > 0 {
+		fetchTimeout = opts.FetchTimeout
 	}
 
 	// Create pull subscription
-	sub, err := js.PullSubscribe(subject, durable)
+	sub, err := js.PullSubscribe(subject, opts.Durable)
 	if err != nil {
 		return fmt.Errorf("failed to create pull subscription: %w", err)
 	}
@@ -291,10 +257,10 @@ func (s *NATSSubscriber) SubscribePull(subject, durable string, handler HandlerF
 	s.subscriptions = append(s.subscriptions, sub)
 	s.mu.Unlock()
 
-	s.client.logger.Info("Created pull subscription",
+	s.client.logger.Debug("Created pull subscription",
 		zap.String("subject", subject),
-		zap.String("durable", durable),
-		zap.Int("batch_size", options.BatchSize),
+		zap.String("durable", opts.Durable),
+		zap.Int("batch_size", batchSize),
 	)
 
 	// Start background worker
@@ -306,30 +272,32 @@ func (s *NATSSubscriber) SubscribePull(subject, durable string, handler HandlerF
 			if !sub.IsValid() {
 				s.client.logger.Warn("Pull subscription invalid, stopping worker",
 					zap.String("subject", subject),
-					zap.String("durable", durable),
+					zap.String("durable", opts.Durable),
 				)
 				return
 			}
 
 			// Fetch batch
-			msgs, err := sub.Fetch(options.BatchSize, nats.MaxWait(options.FetchTimeout))
+			msgs, err := sub.Fetch(batchSize, nats.MaxWait(fetchTimeout))
 			if err != nil {
 				if err == nats.ErrTimeout {
 					// Timeout is normal if no messages, just continue
+					// Check for context cancellation or closure if needed, but loop continues
 					continue
 				}
 				if err == nats.ErrConnectionClosed || err == nats.ErrBadSubscription {
 					// Stop on terminal errors
 					return
 				}
-				s.client.logger.Error("Failed to fetch messages", zap.Error(err))
+				// Log but continue (backoff?)
+				s.client.logger.Debug("Failed to fetch messages (retrying)", zap.Error(err))
 				time.Sleep(1 * time.Second) // Backoff
 				continue
 			}
 
 			// Process batch
 			for _, msg := range msgs {
-				s.processJetStreamMessage(msg, handler)
+				s.processJetStreamMessage(msg, handler, opts)
 			}
 		}
 	}()
@@ -338,7 +306,7 @@ func (s *NATSSubscriber) SubscribePull(subject, durable string, handler HandlerF
 }
 
 // processJetStreamMessage handles a single JetStream message
-func (s *NATSSubscriber) processJetStreamMessage(msg *nats.Msg, handler HandlerFunc) {
+func (s *NATSSubscriber) processJetStreamMessage(msg *nats.Msg, handler HandlerFunc, opts *SubscribeOptions) {
 	// Unmarshal envelope
 	var envelope MessageEnvelope
 	if err := json.Unmarshal(msg.Data, &envelope); err != nil {
@@ -350,33 +318,10 @@ func (s *NATSSubscriber) processJetStreamMessage(msg *nats.Msg, handler HandlerF
 		return
 	}
 
-	// Extract trace context
-	ctx := otel.GetTextMapPropagator().Extract(context.Background(), metadataCarrier(envelope.Metadata))
-
 	// Capture NATS reply subject
 	if msg.Reply != "" {
 		envelope.Reply = msg.Reply
 	}
-
-	// Validate data if validator is set
-	if s.validator != nil {
-		if err := s.validator.Validate(envelope.Type, envelope.Data); err != nil {
-			s.client.logger.Error("JetStream validation failed",
-				zap.Error(err),
-				zap.String("subject", msg.Subject),
-				zap.String("type", envelope.Type),
-				zap.String("id", envelope.ID),
-			)
-			// We don't Ack here, so it will be redelivered or go to DLQ
-			return
-		}
-	}
-
-	s.client.logger.Debug("Received JetStream message",
-		zap.String("subject", msg.Subject),
-		zap.String("type", envelope.Type),
-		zap.String("id", envelope.ID),
-	)
 
 	// Apply middleware
 	h := handler
@@ -384,13 +329,43 @@ func (s *NATSSubscriber) processJetStreamMessage(msg *nats.Msg, handler HandlerF
 		h = s.middleware[i](h)
 	}
 
-	// Handle message
-	if err := h(ctx, msg.Subject, &envelope); err != nil {
+	// Handle message (tracing is handled in middleware)
+	if err := h(context.Background(), msg.Subject, &envelope); err != nil {
 		s.client.logger.Error("JetStream handler error",
 			zap.Error(err),
 			zap.String("subject", msg.Subject),
 			zap.String("message_id", envelope.ID),
 		)
+
+		// Check for DLQ
+		meta, metaErr := msg.Metadata()
+		if metaErr == nil && opts != nil && opts.DLQSubject != "" && opts.MaxDeliveries > 0 {
+			if int(meta.NumDelivered) >= opts.MaxDeliveries {
+				s.client.logger.Warn("Message exceeded max deliveries, moving to DLQ",
+					zap.String("subject", msg.Subject),
+					zap.String("dlq", opts.DLQSubject),
+					zap.String("message_id", envelope.ID),
+					zap.Uint64("deliveries", meta.NumDelivered),
+				)
+
+				// Publish to DLQ
+				// We reuse the client connection to publish.
+				// Note: We publish the RAW data to preserve original content.
+				if err := s.client.Conn().Publish(opts.DLQSubject, msg.Data); err != nil {
+					s.client.logger.Error("Failed to publish to DLQ", zap.Error(err))
+					// If DLQ publish fails, we Nak to retry (hopefully transient)
+					_ = msg.Nak()
+					return
+				}
+
+				// Ack original message so it doesn't redeliver
+				if err := msg.Ack(); err != nil {
+					s.client.logger.Error("Failed to ack message after DLQ move", zap.Error(err))
+				}
+				return
+			}
+		}
+
 		// Explicitly Nak to trigger redelivery
 		if err := msg.Nak(); err != nil {
 			s.client.logger.Error("Failed to nak JetStream message", zap.Error(err))
@@ -410,7 +385,7 @@ func (s *NATSSubscriber) processJetStreamMessage(msg *nats.Msg, handler HandlerF
 
 // Close closes the subscriber and unsubscribes from all subjects
 func (s *NATSSubscriber) Close() error {
-	if err := s.Unsubscribe(); err != nil {
+	if err := s.Unsubscribe(context.Background()); err != nil {
 		return err
 	}
 
@@ -423,9 +398,10 @@ func (s *NATSSubscriber) Close() error {
 
 	select {
 	case <-done:
-		s.client.logger.Info("Subscriber closed gracefully")
-	case <-time.After(5 * time.Second):
-		s.client.logger.Warn("Subscriber closed with active handlers (timeout)")
+		s.client.logger.Debug("Subscriber closed gracefully")
+	case <-time.After(s.drainTimeout):
+		s.client.logger.Warn("Subscriber closed with active handlers (timeout)",
+			zap.Duration("timeout", s.drainTimeout))
 	}
 
 	return nil

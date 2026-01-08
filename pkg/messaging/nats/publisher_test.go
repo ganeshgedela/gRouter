@@ -13,7 +13,7 @@ import (
 func TestNewPublisher(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -24,7 +24,7 @@ func TestNewPublisher(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	publisher := NewPublisher(client, "test-service")
+	publisher := NewPublisher(client)
 	if publisher == nil {
 		t.Fatalf("NewPublisher() returned nil")
 	}
@@ -35,15 +35,15 @@ func TestNewPublisher(t *testing.T) {
 		t.Fatalf("Publisher is not *NATSPublisher")
 	}
 
-	if natsPub.source != "test-service" {
-		t.Errorf("Publisher source = %v, want %v", natsPub.source, "test-service")
+	if natsPub.client == nil {
+		t.Errorf("Publisher client is nil")
 	}
 }
 
 func TestPublisher_Publish_NotConnected(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -54,7 +54,7 @@ func TestPublisher_Publish_NotConnected(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	publisher := NewPublisher(client, "test-service")
+	publisher := NewPublisher(client)
 
 	// Try to publish without connection
 	err = publisher.Publish(context.Background(), "test.subject", "test.event", map[string]string{"key": "value"}, nil)
@@ -70,7 +70,7 @@ func TestPublisher_Publish_Integration(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -88,7 +88,7 @@ func TestPublisher_Publish_Integration(t *testing.T) {
 	}
 	defer client.Close()
 
-	publisher := NewPublisher(client, "test-service")
+	publisher := NewPublisher(client)
 
 	tests := []struct {
 		name    string
@@ -144,7 +144,7 @@ func TestPublisher_Request_Integration(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -178,10 +178,10 @@ func TestPublisher_Request_Integration(t *testing.T) {
 		t.Fatalf("Failed to set up responder: %v", err)
 	}
 
-	publisher := NewPublisher(client, "test-service")
+	publisher := NewPublisher(client)
 
 	// Test request
-	response, err := publisher.Request(context.Background(), "test.request", "test.request", map[string]string{"key": "value"}, 2*time.Second)
+	response, err := publisher.Request(context.Background(), "test.request", "test.request", map[string]string{"key": "value"}, 2*time.Second, nil)
 	if err != nil {
 		t.Errorf("Request() error = %v", err)
 		return
@@ -204,7 +204,7 @@ func TestPublisher_Request_Timeout(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -222,10 +222,10 @@ func TestPublisher_Request_Timeout(t *testing.T) {
 	}
 	defer client.Close()
 
-	publisher := NewPublisher(client, "test-service")
+	publisher := NewPublisher(client)
 
 	// Request to non-existent subject should timeout
-	_, err = publisher.Request(context.Background(), "test.nonexistent", "test.request", map[string]string{"key": "value"}, 100*time.Millisecond)
+	_, err = publisher.Request(context.Background(), "test.nonexistent", "test.request", map[string]string{"key": "value"}, 100*time.Millisecond, nil)
 	if err == nil {
 		t.Error("Request() should timeout when no responder exists")
 	}
@@ -238,7 +238,7 @@ func TestPublisher_InvalidData(t *testing.T) {
 
 	logger, _ := zap.NewDevelopment()
 	config := Config{
-		URL:               "nats://localhost:4222",
+		URL:               GetTestNATSURL(nil),
 		MaxReconnects:     10,
 		ReconnectWait:     2 * time.Second,
 		ConnectionTimeout: 5 * time.Second,
@@ -256,7 +256,7 @@ func TestPublisher_InvalidData(t *testing.T) {
 	}
 	defer client.Close()
 
-	publisher := NewPublisher(client, "test-service")
+	publisher := NewPublisher(client)
 
 	// Try to publish unmarshalable data
 	err = publisher.Publish(context.Background(), "test.subject", "test.event", make(chan int), nil)
