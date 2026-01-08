@@ -89,10 +89,20 @@ type LoggingConfig struct {
 }
 
 // LogConfig holds logging configuration
+// LogConfig defines logging configuration
 type LogConfig struct {
-	Level      string `mapstructure:"level"`
-	Format     string `mapstructure:"format"` // json or console
-	OutputPath string `mapstructure:"output_path"`
+	Level            string   `mapstructure:"level"`              // debug, info, warn, error
+	Format           string   `mapstructure:"format"`             // json or console (alias for Encoding)
+	Encoding         string   `mapstructure:"encoding"`           // json or console
+	OutputPath       string   `mapstructure:"output_path"`        // Single output path (for backward compatibility)
+	OutputPaths      []string `mapstructure:"output_paths"`       // Multiple output paths
+	ErrorOutputPaths []string `mapstructure:"error_output_paths"` // Error output paths
+
+	// File rotation settings
+	MaxSize    int  `mapstructure:"max_size"`    // Maximum size in MB before rotation
+	MaxBackups int  `mapstructure:"max_backups"` // Maximum number of old files to retain
+	MaxAge     int  `mapstructure:"max_age"`     // Maximum days to retain old files
+	Compress   bool `mapstructure:"compress"`    // Whether to compress rotated files
 }
 
 // WebConfig holds web server configuration

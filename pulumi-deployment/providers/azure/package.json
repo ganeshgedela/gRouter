@@ -1,0 +1,23 @@
+{
+    "name": "grouter-pulumi-azure",
+    "version": "1.0.0",
+    "description": "Pulumi IaC for gRouter on Azure",
+    "main": "index.ts",
+    "scripts": {
+        "build": "tsc",
+        "preview": "pulumi preview",
+        "up": "pulumi up",
+        "destroy": "pulumi destroy"
+    },
+    "dependencies": {
+        "@pulumi/pulumi": "^3.x",
+        "@pulumi/azure-native": "^2.x",
+        "@pulumi/kubernetes": "^4.x",
+        "@pulumi/docker": "^4.x",
+        "@pulumi/random": "^4.x"
+    },
+    "devDependencies": {
+        "@types/node": "^20.x",
+        "typescript": "^5.x"
+    }
+}

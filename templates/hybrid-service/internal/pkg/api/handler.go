@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sync"
 
 	"grouter/pkg/manager"
 	"grouter/pkg/messaging/nats"
@@ -22,12 +23,22 @@ func init() {
 	})
 }
 
+// Item represents an API item
+type Item struct {
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description,omitempty"`
+	Price       float64 `json:"price"`
+}
+
 // Handler handles HTTP requests and publishes events
 type Handler struct {
 	id        string
 	logger    *zap.Logger
 	messenger *nats.Messenger
 	status    manager.HealthStatus
+	items     map[string]Item
+	mu        sync.RWMutex
 }
 
 // NewHandler creates a new API handler
@@ -37,6 +48,7 @@ func NewHandler(logger *zap.Logger, messenger *nats.Messenger) *Handler {
 		logger:    logger,
 		messenger: messenger,
 		status:    manager.StatusCreated,
+		items:     make(map[string]Item),
 	}
 }
 
@@ -78,56 +90,139 @@ func (h *Handler) Stop(ctx context.Context) error {
 
 // RegisterRoutes registers API routes
 func (h *Handler) RegisterRoutes(router gin.IRouter) {
-	api := router.Group("/api")
+	v1 := router.Group("/api/v1")
 	{
-		api.POST("/orders", h.CreateOrder)
-		api.GET("/health", h.Health)
+		// Items endpoints
+		v1.GET("/items", h.ListItems)
+		v1.POST("/items", h.CreateItem)
+		v1.GET("/items/:id", h.GetItem)
+		v1.DELETE("/items/:id", h.DeleteItem)
+
+		// Health endpoint
+		v1.GET("/health", h.Health)
 	}
 }
 
-// CreateOrder creates an order and publishes an event
-// @Summary Create order
-// @Description Create new order and publish event to NATS
-// @Tags orders
-// @Accept json
-// @Produce json
-// @Success 201 {object} map[string]interface{}
-// @Router /api/orders [post]
-func (h *Handler) CreateOrder(c *gin.Context) {
-	h.logger.Info("creating order via HTTP")
+// ListItems returns all items
+func (h *Handler) ListItems(c *gin.Context) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 
-	orderData := map[string]interface{}{
-		"order_id": "order-123",
-		"user_id":  "user-456",
-		"amount":   99.99,
-	}
-
-	// Publish event to NATS
-	if h.messenger != nil {
-		opts := &nats.PublishOptions{}
-		err := h.messenger.Publish(context.Background(), "orders.created", "order.created", orderData, opts)
-		if err != nil {
-			h.logger.Error("failed to publish event", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish event"})
-			return
-		}
-		h.logger.Info("published order.created event")
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Order created and event published",
-		"order":   orderData,
-	})
-}
-
-// Health handles health check
-func (h *Handler) Health(c *gin.Context) {
-	status := "healthy"
-	if h.messenger != nil && !h.messenger.IsConnected() {
-		status = "degraded - NATS disconnected"
+	items := make([]Item, 0, len(h.items))
+	for _, item := range h.items {
+		items = append(items, item)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"status": status,
+		"items": items,
+		"count": len(items),
 	})
+}
+
+// CreateItem creates a new item
+func (h *Handler) CreateItem(c *gin.Context) {
+	var item Item
+	if err := c.ShouldBindJSON(&item); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Generate ID if not provided
+	if item.ID == "" {
+		item.ID = fmt.Sprintf("item-%d", len(h.items)+1)
+	}
+
+	h.mu.Lock()
+	h.items[item.ID] = item
+	h.mu.Unlock()
+
+	h.logger.Info("created item", zap.String("id", item.ID))
+
+	// Publish event to NATS
+	if h.messenger != nil {
+		ctx := c.Request.Context()
+		eventData := map[string]interface{}{
+			"item_id":     item.ID,
+			"name":        item.Name,
+			"description": item.Description,
+			"price":       item.Price,
+		}
+		if err := h.messenger.Publish(ctx, "item.created", "item.created", eventData, &nats.PublishOptions{}); err != nil {
+			h.logger.Error("failed to publish item.created event", zap.Error(err))
+		} else {
+			h.logger.Info("published item.created event to NATS", zap.String("item_id", item.ID))
+		}
+	}
+
+	c.JSON(http.StatusCreated, item)
+}
+
+// GetItem returns a specific item
+func (h *Handler) GetItem(c *gin.Context) {
+	id := c.Param("id")
+
+	h.mu.RLock()
+	item, exists := h.items[id]
+	h.mu.RUnlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "item not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, item)
+}
+
+// DeleteItem deletes an item
+func (h *Handler) DeleteItem(c *gin.Context) {
+	id := c.Param("id")
+
+	h.mu.Lock()
+	_, exists := h.items[id]
+	if exists {
+		delete(h.items, id)
+	}
+	h.mu.Unlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "item not found"})
+		return
+	}
+
+	h.logger.Info("deleted item", zap.String("id", id))
+
+	// Publish event to NATS
+	if h.messenger != nil {
+		ctx := c.Request.Context()
+		eventData := map[string]interface{}{"item_id": id}
+		if err := h.messenger.Publish(ctx, "item.deleted", "item.deleted", eventData, &nats.PublishOptions{}); err != nil {
+			h.logger.Error("failed to publish item.deleted event", zap.Error(err))
+		} else {
+			h.logger.Info("published item.deleted event to NATS", zap.String("item_id", id))
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "item deleted"})
+}
+
+// Health returns API health status
+func (h *Handler) Health(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "healthy",
+		"service": "hybrid-api",
+		"items":   len(h.items),
+	})
+}
+
+// WebRoutable interface implementation
+func (h *Handler) IsWebRoutable() bool {
+	return true
+}
+
+func (h *Handler) GetRouteRegistrar() func(router interface{}) {
+	return func(router interface{}) {
+		if r, ok := router.(gin.IRouter); ok {
+			h.RegisterRoutes(r)
+		}
+	}
 }

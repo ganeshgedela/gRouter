@@ -69,11 +69,17 @@ func (a *App) Init(ctx context.Context) error {
 func (a *App) Start(ctx context.Context) error {
 	a.deps.Logger.Info("starting REST API application")
 
+	// Initialize the web server
+	if err := a.server.Init(ctx); err != nil {
+		return fmt.Errorf("failed to initialize web server: %w", err)
+	}
+
 	// Start all services
 	if err := a.manager.StartServices(ctx); err != nil {
 		return fmt.Errorf("failed to start services: %w", err)
 	}
 
+	// Start the web server
 	return a.server.Start(ctx)
 }
 

@@ -96,6 +96,28 @@ func validate(cfg *Config) error {
 	if cfg.NATS.Enabled && cfg.NATS.URL == "" {
 		return fmt.Errorf("nats.url is required")
 	}
+
+	// Set defaults for log config
+	if cfg.Log.Level == "" {
+		cfg.Log.Level = "info"
+	}
+
+	// Handle both format and encoding (use format if set, otherwise encoding)
+	if cfg.Log.Format == "" && cfg.Log.Encoding != "" {
+		cfg.Log.Format = cfg.Log.Encoding
+	}
+	if cfg.Log.Format == "" {
+		cfg.Log.Format = "json"
+	}
+
+	// Handle output paths - use OutputPaths if set, otherwise OutputPath
+	if len(cfg.Log.OutputPaths) == 0 && cfg.Log.OutputPath != "" {
+		cfg.Log.OutputPaths = []string{cfg.Log.OutputPath}
+	}
+	if len(cfg.Log.OutputPaths) == 0 {
+		cfg.Log.OutputPaths = []string{"stdout"}
+	}
+
 	validLogLevels := map[string]bool{
 		"debug": true,
 		"info":  true,

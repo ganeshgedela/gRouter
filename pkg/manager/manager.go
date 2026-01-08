@@ -153,7 +153,6 @@ func (m *ServiceManager) Run(ctx context.Context) error {
 	}
 
 	// Start Supervision Loop
-	// Start Supervision Loop
 	go m.MonitorServices(ctx, quit)
 
 	select {

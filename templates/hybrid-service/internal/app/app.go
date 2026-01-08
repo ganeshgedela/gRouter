@@ -9,6 +9,8 @@ import (
 	"grouter/pkg/web"
 	appconfig "grouter/templates/hybrid-service/internal/config"
 
+	"go.uber.org/zap"
+
 	// Import service packages to register factories
 	_ "grouter/templates/hybrid-service/internal/pkg/api"
 )
@@ -71,13 +73,49 @@ func (a *App) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize services: %w", err)
 	}
 
+	// Note: Route registration happens in Start() after webServer.Init()
+
 	a.deps.Logger.Info("Hybrid application initialized")
 	return nil
+}
+
+// registerServiceRoutes registers routes for all WebRoutable services
+func (a *App) registerServiceRoutes() {
+	router := a.webServer.Engine()
+	serviceIDs := a.manager.ListServices()
+
+	for _, serviceID := range serviceIDs {
+		svc, err := a.manager.GetService(serviceID)
+		if err != nil {
+			a.deps.Logger.Warn("failed to get service for route registration",
+				zap.String("service_id", serviceID),
+				zap.Error(err))
+			continue
+		}
+
+		// Check if service implements WebRoutable interface
+		if routable, ok := svc.(interface {
+			IsWebRoutable() bool
+			GetRouteRegistrar() func(router interface{})
+		}); ok && routable.IsWebRoutable() {
+			a.deps.Logger.Info("registering routes for service", zap.String("service", svc.Name()))
+			registrar := routable.GetRouteRegistrar()
+			registrar(router)
+		}
+	}
 }
 
 // Start starts the application
 func (a *App) Start(ctx context.Context) error {
 	a.deps.Logger.Info("starting Hybrid application")
+
+	// Initialize the web server first
+	if err := a.webServer.Init(ctx); err != nil {
+		return fmt.Errorf("failed to initialize web server: %w", err)
+	}
+
+	// NOW register routes (after webServer.Init which sets up the Gin engine)
+	a.registerServiceRoutes()
 
 	// Start all services
 	if err := a.manager.StartServices(ctx); err != nil {
