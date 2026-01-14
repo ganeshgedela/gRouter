@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "grouter/templates/db-service/api/v1;commonv1";
+
+// PaginationRequest contains pagination parameters
+message PaginationRequest {
+  int32 page = 1;          // Page number (1-indexed)
+  int32 page_size = 2;     // Number of items per page
+  string sort = 3;         // Sort order (e.g., "price desc", "name asc")
+  map<string, string> filters = 4; // Dynamic filters (e.g., {"status": "active"})
+}
+
+// PaginationResponse contains pagination metadata
+message PaginationResponse {
+  int64 total = 1;         // Total number of items
+  int32 page = 2;          // Current page
+  int32 page_size = 3;     // Items per page
+  int32 total_pages = 4;   // Total number of pages
+}

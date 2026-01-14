@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Nebula White Theme - Light Mode */
+    --background: 240 10% 98%;
+    /* Very light grey/white */
+    --foreground: 240 10% 3.9%;
+    /* Dark Text */
+
+    --card: 0 0% 100%;
+    /* Pure White */
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --primary: 263.4 70% 50.4%;
+    /* Electric Violet (Brand) */
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 263.4 70% 50.4%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 240 10% 12%;
+    /* Dark Grey */
+    --foreground: 0 0% 98%;
+    --card: 240 10% 16%;
+    /* Lighter Grey for cards */
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 16%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 263.4 70% 50.4%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 240 4% 20%;
+    /* Adjusted secondary */
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 20%;
+    --muted-foreground: 240 5% 70%;
+    --accent: 263.4 70% 50.4%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 4% 24%;
+    /* Lighter border */
+    --input: 240 4% 24%;
+    --ring: 263.4 70% 50.4%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}

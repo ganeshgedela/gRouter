@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: db-service-postgres
+    environment:
+      POSTGRES_USER: grouter
+      POSTGRES_PASSWORD: grouter123
+      POSTGRES_DB: products_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grouter"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Database Service
+  db-service:
+    build:
+      context: ../../
+      dockerfile: templates/db-service/Dockerfile
+    container_name: db-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database configuration
+      DB_DRIVER: postgres
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: grouter
+      DB_PASSWORD: grouter123
+      DB_NAME: products_db
+      DB_SSLMODE: disable
+      DB_MAX_OPEN_CONNS: 25
+      DB_MAX_IDLE_CONNS: 5
+      DB_CONN_MAX_LIFETIME: 5m
+      DB_LOG_LEVEL: info
+    ports:
+      - "9090:9090"  # gRPC
+      - "8080:8080"  # Metrics
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=:9090"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # gRPC UI for testing (optional)
+  grpcui:
+    image: fullstorydev/grpcui:latest
+    container_name: db-service-grpcui
+    depends_on:
+      - db-service
+    ports:
+      - "8081:8081"
+    command:
+      - -plaintext
+      - -port=8081
+      - db-service:9090
+
+volumes:
+  postgres_data:

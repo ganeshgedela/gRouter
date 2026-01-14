@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Connection Test</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            padding: 40px; 
+            background: #1a1a1a; 
+            color: #00ff00;
+        }
+        .success { 
+            font-size: 24px; 
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1 class="success">✓ SERVER CONNECTION WORKING!</h1>
+    <p>If you can see this green text, the Vite server is accessible from your browser.</p>
+    <p>Now try the main app at: <a href="/" style="color: #00ffff;">http://192.168.56.10:5175/</a></p>
+    <hr>
+    <p style="color: yellow;">Debug Info:</p>
+    <ul>
+        <li>Timestamp: <span id="time"></span></li>
+        <li>User Agent: <span id="ua"></span></li>
+    </ul>
+    <script>
+        document.getElementById('time').textContent = new Date().toLocaleString();
+        document.getElementById('ua').textContent = navigator.userAgent;
+        console.log("Test page loaded successfully!");
+    </script>
+</body>
+</html>

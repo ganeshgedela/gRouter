@@ -1,1 +1,0 @@
-../nats-service/go.mod
