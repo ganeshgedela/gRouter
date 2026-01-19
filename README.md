@@ -44,13 +44,15 @@ A Go-based event-driven microservice architecture using NATS for message handlin
 
 ## Prerequisites
 
+For a detailed step-by-step installation guide, please refer to [docs/installation_prerequisites.md](docs/installation_prerequisites.md).
+
 ### For Go Build
-- Go 1.22 or higher
+- Go 1.24 or higher
 - NATS server (for runtime)
 
 ### For Bazel Build
 - Bazel 6.0+ or Bazelisk
-- Go 1.22 or higher
+- Go 1.24 or higher
 
 ## Quick Start
 

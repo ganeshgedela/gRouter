@@ -87,6 +87,181 @@ graph TB
     style I fill:#FF9800
 ```
 
+## 🔄 Sequence Diagrams
+
+### Create Product Flow
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client (grpcurl/App)
+    participant I as Interceptor (Auth/Log/Metric)
+    participant S as Service (ProductServer)
+    participant R as Repository
+    participant D as DB (PostgreSQL)
+
+    Note over C,D: Create Product (Unary)
+    C->>I: CreateProduct(req)
+    I->>I: Start Timer & Log
+    I->>S: CreateProduct(ctx, req)
+    S->>S: Validate(req)
+    S->>R: FindBySKU(ctx, sku)
+    R->>D: SELECT ... LIMIT 1
+    D-->>R: Not Found
+    R-->>S: nil (OK)
+    S->>R: Create(ctx, product)
+    R->>D: INSERT INTO products...
+    D-->>R: ID: 101
+    R-->>S: Success
+    S-->>I: Product{ID: 101, ...}
+    I->>I: Record Metric & Log Success
+    I-->>C: Product{ID: 101, ...}
+```
+
+### Get Product Flow (Read)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as Service
+    participant R as Repository
+    participant D as Database
+
+    Note over C,D: Get Product (Unary)
+    C->>S: GetProduct(id)
+    S->>S: Validate ID
+    S->>R: FindByID(ctx, id)
+    R->>D: SELECT ... WHERE id = ?
+    alt Found
+        D-->>R: Product Row
+        R-->>S: Product Model
+        S-->>C: Product Proto
+    else Not Found
+        D-->>R: No Rows
+        R-->>S: Error(NotFound)
+        S-->>C: GRPC Error(NotFound)
+    end
+```
+
+### List Products Flow
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as Service
+    participant R as Repository
+    participant D as Database
+
+    Note over C,D: List Products (Pagination)
+    C->>S: ListProducts(req)
+    S->>S: Parse Pagination
+    S->>R: List(ctx, pagination)
+    R->>D: SELECT count(*) (Total)
+    D-->>R: 50
+    R->>D: SELECT ... OFFSET 0 LIMIT 10
+    D-->>R: [Rows...]
+    R-->>S: ([]Product, 50)
+    S-->>C: ListProductsResponse
+```
+
+### Update Product Flow
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as Service
+    participant R as Repository
+    participant D as Database
+
+    Note over C,D: Update Product (Unary)
+    C->>S: UpdateProduct(req)
+    S->>S: Validate ID
+    S->>R: FindByID(ctx, id)
+    R->>D: SELECT ...
+    D-->>R: Product Row
+    R-->>S: Product Model
+    S->>S: Apply Updates
+    S->>R: Update(ctx, product)
+    R->>D: UPDATE products SET ...
+    D-->>R: Success
+    R-->>S: Success
+    S-->>C: Updated Product Proto
+```
+
+### Delete Product Flow
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as Service
+    participant R as Repository
+    participant D as Database
+
+    Note over C,D: Delete Product (Unary)
+    C->>S: DeleteProduct(id)
+    S->>S: Validate ID
+    S->>R: FindByID(ctx, id) (Check Exists)
+    R->>D: SELECT 1 ...
+    D-->>R: Success
+    S->>R: Delete(ctx, id)
+    R->>D: DELETE FROM products WHERE id = ?
+    D-->>R: Success
+    R-->>S: Success
+    S-->>C: Empty Response
+```
+
+### Update Stock Flow (Atomic Transaction)
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as Service
+    participant R as Repository
+    participant D as Database
+
+    Note over C,D: Update Stock (Atomic)
+    C->>S: UpdateStock(id, delta)
+    S->>R: UpdateStock(ctx, id, delta)
+    R->>D: BEGIN TX
+    R->>D: SELECT ... FOR UPDATE (Lock Row)
+    D-->>R: Current Stock
+    R->>R: Calculate New Stock
+    alt Sufficient Stock
+        R->>D: UPDATE products SET stock = ...
+        R->>D: COMMIT
+        R-->>S: Updated Product
+        S-->>C: Updated Product Proto
+    else Insufficient Stock
+        R->>D: ROLLBACK
+        R-->>S: Error
+        S-->>C: GRPC Error
+    end
+```
+
+### Bulk Create Flow
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant S as Service
+    participant R as Repository
+    participant D as Database
+
+    Note over C,D: Bulk Create (Streaming)
+    C->>S: Stream Init
+    loop Every Msg
+        C->>S: Send(ProductReq)
+        S->>S: Collect & Validate
+    end
+    C->>S: CloseSend()
+    S->>R: BulkCreate(ctx, products[])
+    R->>D: BEGIN TX
+    R->>D: INSERT INTO ... (Batch 1)
+    R->>D: INSERT INTO ... (Batch 2)
+    R->>D: COMMIT
+    R-->>S: Success
+    S-->>C: Response(Created: 50)
+```
+
 ## 🎯 API Reference
 
 ### ProductService Methods
