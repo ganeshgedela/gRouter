@@ -7,6 +7,7 @@ import (
 	"grouter/pkg/database"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Repository extends the generic database repository with product-specific methods
@@ -35,23 +36,23 @@ func (r *Repository) FindBySKU(ctx context.Context, sku string) (*Product, error
 // UpdateStock atomically updates the stock of a product
 func (r *Repository) UpdateStock(ctx context.Context, id uint, delta int) (*Product, error) {
 	var product Product
-	
+
 	// Use transaction for atomic update
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Lock the row for update
-		if err := tx.Clauses(gorm.Locking{Strength: "UPDATE"}).First(&product, id).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&product, id).Error; err != nil {
 			return err
 		}
-		
+
 		newStock := product.Stock + delta
 		if newStock < 0 {
 			return fmt.Errorf("insufficient stock: current=%d, delta=%d", product.Stock, delta)
 		}
-		
+
 		product.Stock = newStock
 		return tx.Save(&product).Error
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -69,34 +70,34 @@ func (r *Repository) BulkCreate(ctx context.Context, products []*Product) error 
 func (r *Repository) SearchByName(ctx context.Context, query string, pagination database.Pagination) ([]Product, int64, error) {
 	var products []Product
 	var total int64
-	
+
 	db := r.db.WithContext(ctx).Model(&Product{})
-	
+
 	// Add search filter
 	if query != "" {
 		likeQuery := "%" + query + "%"
 		db = db.Where("name LIKE ? OR description LIKE ?", likeQuery, likeQuery)
 	}
-	
+
 	// Apply pagination filters
 	if len(pagination.Filters) > 0 {
 		db = db.Where(pagination.Filters)
 	}
-	
+
 	// Count total
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	
+
 	// Apply sorting and pagination
 	if pagination.Sort != "" {
 		db = db.Order(pagination.Sort)
 	}
-	
+
 	err := db.Offset(pagination.GetOffset()).Limit(pagination.GetLimit()).Find(&products).Error
 	if err != nil {
 		return nil, 0, err
 	}
-	
+
 	return products, total, nil
 }

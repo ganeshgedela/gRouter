@@ -161,7 +161,7 @@ func testNATSMessaging(log *zap.Logger) {
 	received := make(chan bool, 1)
 
 	_, err = messenger.Subscribe(ctx, "test.hybrid", func(ctx context.Context, subject string, envelope *nats.MessageEnvelope) error {
-		fmt.Printf("  ✅ Received NATS message on %s: %v\n", subject, envelope.Payload)
+		fmt.Printf("  ✅ Received NATS message on %s: %s\n", subject, string(envelope.Data))
 		received <- true
 		return nil
 	}, &nats.SubscribeOptions{})

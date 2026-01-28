@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package common.v1;
 
-option go_package = "grouter/templates/db-service/api/v1;commonv1";
+option go_package = "grouter/templates/db-service/api/v1;productv1";
 
 // PaginationRequest contains pagination parameters
 message PaginationRequest {
