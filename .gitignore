@@ -29,3 +29,4 @@ Thumbs.db
 # Config (local overrides)
 configs/local.yaml
 configs/*.local.yaml
+.gemini_protoc/

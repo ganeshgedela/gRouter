@@ -1,4 +1,6 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//proto:def.bzl", "go_proto_library")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 
 # Proto files are generated manually with:
 # protoc --go_out=. --go_opt=paths=source_relative \
@@ -20,4 +22,18 @@ go_library(
         "@org_golang_google_protobuf//reflect/protoreflect",
         "@org_golang_google_protobuf//runtime/protoimpl",
     ],
+)
+
+proto_library(
+    name = "proto_proto",
+    srcs = ["hello.proto"],
+    visibility = ["//visibility:public"],
+)
+
+go_proto_library(
+    name = "proto_go_proto",
+    compilers = ["@rules_go//proto:go_grpc"],
+    importpath = "grouter/templates/grpc-service/api/proto",
+    proto = ":proto_proto",
+    visibility = ["//visibility:public"],
 )

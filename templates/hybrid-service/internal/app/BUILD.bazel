@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "app",
@@ -11,5 +11,6 @@ go_library(
         "//pkg/web",
         "//templates/hybrid-service/internal/config",
         "//templates/hybrid-service/internal/pkg/api",
+        "@org_uber_go_zap//:zap",
     ],
 )

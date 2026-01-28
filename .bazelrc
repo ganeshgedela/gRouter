@@ -1,1 +1,2 @@
-common --enable_workspace
+# Use bzlmod for modern dependency management
+common --enable_bzlmod

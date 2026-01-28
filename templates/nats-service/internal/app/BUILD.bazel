@@ -1,4 +1,4 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "app",
@@ -11,6 +11,5 @@ go_library(
         "//templates/nats-service/internal/config",
         "//templates/nats-service/internal/pkg/orders",
         "//templates/nats-service/internal/pkg/users",
-        "@org_uber_go_zap//:zap",
     ],
 )

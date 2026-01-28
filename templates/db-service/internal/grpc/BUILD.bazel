@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "grpc",
+    srcs = ["product_server.go"],
+    importpath = "grouter/templates/db-service/internal/grpc",
+    visibility = ["//templates/db-service:__subpackages__"],
+    deps = [
+        "//pkg/database",
+        "//templates/db-service/api/v1:api",
+        "//templates/db-service/internal/pkg/products",
+        "@io_gorm_gorm//:gorm",
+        "@org_golang_google_grpc//codes",
+        "@org_golang_google_grpc//status",
+        "@org_golang_google_protobuf//types/known/emptypb",
+        "@org_uber_go_zap//:zap",
+    ],
+)
