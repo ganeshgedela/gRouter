@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "rest",
+    srcs = ["handler.go"],
+    importpath = "grouter/templates/rest-grpc-service/internal/pkg/rest",
+    visibility = ["//templates/rest-grpc-service:__subpackages__"],
+    deps = [
+        "//templates/rest-grpc-service/internal/pkg/business",
+        "@com_github_gin_gonic_gin//:gin",
+        "@org_uber_go_zap//:zap",
+    ],
+)

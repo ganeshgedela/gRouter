@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "app",
+    srcs = ["app.go"],
+    importpath = "grouter/templates/rest-grpc-service/internal/app",
+    visibility = ["//templates/rest-grpc-service:__subpackages__"],
+    deps = [
+        "//templates/rest-grpc-service/internal/config",
+        "//templates/rest-grpc-service/internal/grpc",
+        "//templates/rest-grpc-service/internal/pkg/business",
+        "//templates/rest-grpc-service/internal/pkg/rest",
+        "@com_github_gin_gonic_gin//:gin",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//reflection",
+        "@org_uber_go_zap//:zap",
+    ],
+)

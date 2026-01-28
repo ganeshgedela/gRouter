@@ -1,0 +1,13 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "api",
+    srcs = ["handler.go"],
+    importpath = "grouter/templates/nats-grpc-service/internal/pkg/api",
+    visibility = ["//templates/nats-grpc-service:__subpackages__"],
+    deps = [
+        "//pkg/manager",
+        "//pkg/messaging/nats",
+        "@org_uber_go_zap//:zap",
+    ],
+)

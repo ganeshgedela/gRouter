@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package items;
+
+option go_package = "grouter/templates/rest-grpc-service/api/proto";
+
+// Item represents a product or service item
+message Item {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  double price = 4;
+  int32 quantity = 5;
+}
+
+// CreateItemRequest for creating a new item
+message CreateItemRequest {
+  string name = 1;
+  string description = 2;
+  double price = 3;
+  int32 quantity = 4;
+}
+
+// GetItemRequest for retrieving an item by ID
+message GetItemRequest {
+  string id = 1;
+}
+
+// ListItemsRequest for listing items
+message ListItemsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+// ListItemsResponse for listing items
+message ListItemsResponse {
+  repeated Item items = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
+}
+
+// DeleteItemRequest for deleting an item
+message DeleteItemRequest {
+  string id = 1;
+}
+
+// DeleteItemResponse for delete confirmation
+message DeleteItemResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ItemService defines the gRPC service for item management
+service ItemService {
+  // CreateItem creates a new item
+  rpc CreateItem(CreateItemRequest) returns (Item);
+  
+  // GetItem retrieves an item by ID
+  rpc GetItem(GetItemRequest) returns (Item);
+  
+  // ListItems lists all items
+  rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  
+  // DeleteItem deletes an item by ID
+  rpc DeleteItem(DeleteItemRequest) returns (DeleteItemResponse);
+}

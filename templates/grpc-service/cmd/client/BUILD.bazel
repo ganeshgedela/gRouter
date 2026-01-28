@@ -6,7 +6,6 @@ go_library(
     importpath = "grouter/templates/grpc-service/cmd/client",
     visibility = ["//visibility:private"],
     deps = [
-        "//templates/grpc-service/api/proto",
         "@org_golang_google_grpc//:grpc",
         "@org_golang_google_grpc//credentials/insecure",
     ],

@@ -1,0 +1,12 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "grpc",
+    srcs = ["server.go"],
+    importpath = "grouter/templates/nats-grpc-service/internal/grpc",
+    visibility = ["//templates/nats-grpc-service:__subpackages__"],
+    deps = [
+        "//templates/nats-grpc-service/api/proto",
+        "@org_uber_go_zap//:zap",
+    ],
+)

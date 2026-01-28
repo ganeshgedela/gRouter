@@ -5,9 +5,5 @@ go_library(
     srcs = ["server.go"],
     importpath = "grouter/templates/grpc-service/internal/grpc",
     visibility = ["//templates/grpc-service:__subpackages__"],
-    deps = [
-        "//templates/grpc-service/api/proto",
-        "@org_golang_google_grpc//:grpc",
-        "@org_uber_go_zap//:zap",
-    ],
+    deps = ["@org_uber_go_zap//:zap"],
 )

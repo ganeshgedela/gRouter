@@ -1,0 +1,16 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "app",
+    srcs = ["app.go"],
+    importpath = "grouter/templates/rest-nats-service/internal/app",
+    visibility = ["//templates/rest-nats-service:__subpackages__"],
+    deps = [
+        "//pkg/manager",
+        "//pkg/messaging/nats",
+        "//pkg/web",
+        "//templates/rest-nats-service/internal/config",
+        "//templates/rest-nats-service/internal/pkg/api",
+        "@org_uber_go_zap//:zap",
+    ],
+)

@@ -1,0 +1,18 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "app",
+    srcs = ["app.go"],
+    importpath = "grouter/templates/nats-grpc-service/internal/app",
+    visibility = ["//templates/nats-grpc-service:__subpackages__"],
+    deps = [
+        "//pkg/manager",
+        "//pkg/messaging/grpc",
+        "//pkg/messaging/nats",
+        "//templates/nats-grpc-service/api/proto",
+        "//templates/nats-grpc-service/internal/config",
+        "//templates/nats-grpc-service/internal/grpc",
+        "//templates/nats-grpc-service/internal/pkg/api",
+        "@org_golang_google_grpc//:grpc",
+    ],
+)

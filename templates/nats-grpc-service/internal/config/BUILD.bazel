@@ -1,0 +1,8 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "config",
+    srcs = ["config.go"],
+    importpath = "grouter/templates/nats-grpc-service/internal/config",
+    visibility = ["//templates/nats-grpc-service:__subpackages__"],
+)

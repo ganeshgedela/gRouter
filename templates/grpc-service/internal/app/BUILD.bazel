@@ -7,7 +7,6 @@ go_library(
     visibility = ["//templates/grpc-service:__subpackages__"],
     deps = [
         "//pkg/manager",
-        "//templates/grpc-service/api/proto",
         "//pkg/messaging/grpc",
         "//templates/grpc-service/internal/config",
         "//templates/grpc-service/internal/grpc",
