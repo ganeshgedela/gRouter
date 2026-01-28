@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "products",
@@ -14,5 +14,15 @@ go_library(
         "@io_gorm_gorm//:gorm",
         "@io_gorm_gorm//clause",
         "@org_golang_google_protobuf//types/known/timestamppb",
+    ],
+)
+
+go_test(
+    name = "products_test",
+    srcs = ["products_test.go"],
+    embed = [":products"],
+    deps = [
+        "//templates/db-service/api/v1:api",
+        "@com_github_stretchr_testify//assert",
     ],
 )
